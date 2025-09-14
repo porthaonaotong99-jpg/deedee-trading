@@ -45,6 +45,8 @@ import { LoginDto, CustomerLoginDto, LoginResponseDto } from './dto/auth.dto';
 import { CustomerRegisterDto } from './dto/register.dto';
 import { JwtPayload } from '../../common/interfaces';
 import { WalletsService } from '../wallets/wallets.service';
+import { SessionsService } from '../sessions/sessions.service';
+import { parseDeviceContext } from '../../common/utils/device.util';
 
 @Injectable()
 export class AuthService {
@@ -56,6 +58,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly walletsService: WalletsService,
+    private readonly sessionsService: SessionsService,
   ) {}
 
   async loginUser(loginDto: LoginDto): Promise<LoginResponseDto> {
@@ -100,7 +103,22 @@ export class AuthService {
     };
   }
 
-  async loginCustomer(loginDto: CustomerLoginDto): Promise<LoginResponseDto> {
+  async loginCustomer(
+    loginDto: CustomerLoginDto,
+    deviceRaw?: {
+      userAgent?: string;
+      ipAddress?: string;
+      providedDeviceId?: string;
+      providedDeviceName?: string;
+    },
+  ): Promise<
+    LoginResponseDto & {
+      refresh_token?: string;
+      session_id?: string;
+      device_id?: string;
+      device_name?: string;
+    }
+  > {
     const whereCondition = loginDto.username
       ? { username: loginDto.username }
       : { email: loginDto.email };
@@ -120,10 +138,26 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const payload: JwtPayload = {
+    // Create persistent session + refresh token
+    const refreshTtlDays = Number(
+      this.configService.get<string>('CUSTOMER_REFRESH_TTL_DAYS', '30'),
+    );
+    const parsed = parseDeviceContext(deviceRaw || {});
+    const { session, refreshToken } = await this.sessionsService.create({
+      customerId: customer.id,
+      refreshTtlDays,
+      userAgent: parsed.userAgent,
+      ipAddress: parsed.ipAddress,
+      deviceId: parsed.deviceId,
+      deviceName: parsed.deviceName,
+      metadata: parsed.metadata,
+    });
+
+    const payload: JwtPayload & { sid: string } = {
       sub: customer.id,
       username: customer.username || customer.email || '',
       type: 'customer',
+      sid: session.id,
     };
 
     const secret =
@@ -135,11 +169,15 @@ export class AuthService {
       access_token,
       token_type: 'Bearer',
       expires_in: 86400, // 24 hours
+      refresh_token: refreshToken,
+      session_id: session.id,
       customer: {
         id: customer.id,
         username: customer.username,
         email: customer.email,
       },
+      device_id: session.device_id,
+      device_name: session.device_name,
     };
   }
 
@@ -211,5 +249,65 @@ export class AuthService {
       last_name: saved.last_name,
       wallet_id: wallet.id,
     };
+  }
+
+  // --- Session & Refresh Token Management ---
+  async refreshCustomerToken(sessionId: string, refreshToken: string) {
+    const refreshTtlDays = Number(
+      this.configService.get<string>('CUSTOMER_REFRESH_TTL_DAYS', '30'),
+    );
+    const { session, refreshToken: newToken } =
+      await this.sessionsService.rotate({
+        sessionId,
+        currentRefreshToken: refreshToken,
+        refreshTtlDays,
+      });
+    // Build new access token
+    const customer = await this.customerRepository.findOne({
+      where: { id: session.customer_id },
+    });
+    if (!customer) throw new UnauthorizedException('Customer not found');
+    const payload: JwtPayload & { sid: string } = {
+      sub: customer.id,
+      username: customer.username || customer.email || '',
+      type: 'customer',
+      sid: session.id,
+    };
+    const secret =
+      this.configService.get<string>('JWT_CUSTOMER_SECRET') ||
+      this.configService.get<string>('JWT_SECRET', 'your-secret-key');
+    const access_token = this.jwtService.sign(payload, { secret });
+    return {
+      access_token,
+      token_type: 'Bearer',
+      expires_in: 86400,
+      refresh_token: newToken,
+      session_id: session.id,
+    };
+  }
+
+  async listCustomerSessions(customerId: string) {
+    return this.sessionsService.listByCustomer(customerId);
+  }
+
+  async revokeCustomerSession(customerId: string, sessionId: string) {
+    await this.sessionsService.revoke(sessionId, customerId, 'manual_logout');
+    return { session_id: sessionId };
+  }
+
+  async revokeOtherCustomerSessions(
+    customerId: string,
+    currentSessionId: string,
+  ) {
+    const count = await this.sessionsService.revokeOthers(
+      currentSessionId,
+      customerId,
+    );
+    return { revoked: count };
+  }
+
+  async revokeAllCustomerSessions(customerId: string) {
+    const count = await this.sessionsService.revokeAll(customerId);
+    return { revoked: count };
   }
 }

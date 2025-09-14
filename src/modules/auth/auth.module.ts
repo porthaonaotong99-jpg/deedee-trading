@@ -10,6 +10,7 @@ import { User } from '../users/entities/user.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { getJwtConfig } from '../../config/jwt.config';
 import { WalletsModule } from '../wallets/wallets.module';
+import { SessionsModule } from '../sessions/sessions.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { WalletsModule } from '../wallets/wallets.module';
       inject: [ConfigService],
     }),
     WalletsModule,
+    SessionsModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],
