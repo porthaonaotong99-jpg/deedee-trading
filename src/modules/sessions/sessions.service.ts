@@ -44,6 +44,12 @@ interface CreateSessionInput {
   deviceId?: string;
   deviceName?: string;
   metadata?: Record<string, unknown>;
+  country?: string;
+  province?: string;
+  district?: string;
+  latitude?: number;
+  longitude?: number;
+  geo_location?: Record<string, unknown>;
   refreshTtlDays: number;
 }
 
@@ -74,23 +80,58 @@ export class SessionsService {
   }
 
   async create(input: CreateSessionInput) {
+    // Try to find existing session for this customer/device
+    const session = await this.repo.findOne({
+      where: {
+        customer_id: input.customerId,
+        device_id: input.deviceId,
+        revoked_at: undefined,
+      },
+    });
     const rawToken = this.generateRefreshToken();
     const refresh_token_hash = await this.hash(rawToken);
     const refresh_expires_at = new Date(
       Date.now() + input.refreshTtlDays * 86400000,
     );
-    const entity = this.repo.create({
-      customer_id: input.customerId,
-      user_agent: input.userAgent,
-      ip_address: input.ipAddress,
-      device_id: input.deviceId,
-      device_name: input.deviceName,
-      metadata: input.metadata,
-      refresh_token_hash,
-      refresh_expires_at,
-    });
-    const saved = await this.repo.save(entity);
-    return { session: saved, refreshToken: rawToken };
+    if (session) {
+      // Update existing session with latest info
+      session.user_agent = input.userAgent;
+      session.ip_address = input.ipAddress;
+      session.device_name = input.deviceName;
+      session.metadata = input.metadata;
+      session.country = input.country;
+      session.province = input.province;
+      session.district = input.district;
+      session.latitude = input.latitude;
+      session.longitude = input.longitude;
+      session.geo_location = input.geo_location;
+      session.refresh_token_hash = refresh_token_hash;
+      session.refresh_expires_at = refresh_expires_at;
+      session.last_activity_at = new Date();
+      await this.repo.save(session);
+      return { session, refreshToken: rawToken };
+    } else {
+      // Create new session
+      const entity = this.repo.create({
+        customer_id: input.customerId,
+        user_agent: input.userAgent,
+        ip_address: input.ipAddress,
+        device_id: input.deviceId,
+        device_name: input.deviceName,
+        metadata: input.metadata,
+        country: input.country,
+        province: input.province,
+        district: input.district,
+        latitude: input.latitude,
+        longitude: input.longitude,
+        geo_location: input.geo_location,
+        last_activity_at: new Date(),
+        refresh_token_hash,
+        refresh_expires_at,
+      });
+      const saved = await this.repo.save(entity);
+      return { session: saved, refreshToken: rawToken };
+    }
   }
 
   async findById(id: string) {

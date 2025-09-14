@@ -28,6 +28,24 @@ export class CustomerSession {
   @Column({ type: 'varchar', length: 255, nullable: true })
   device_name?: string;
 
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  country?: string;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  province?: string;
+
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  district?: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 6, nullable: true })
+  latitude?: number;
+
+  @Column({ type: 'jsonb', nullable: true })
+  geo_location?: Record<string, unknown>;
+
+  @Column({ type: 'decimal', precision: 10, scale: 6, nullable: true })
+  longitude?: number;
+
   @Column({ type: 'text' })
   refresh_token_hash!: string;
 

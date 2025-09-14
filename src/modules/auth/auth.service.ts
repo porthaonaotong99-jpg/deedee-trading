@@ -47,6 +47,7 @@ import { JwtPayload } from '../../common/interfaces';
 import { WalletsService } from '../wallets/wallets.service';
 import { SessionsService } from '../sessions/sessions.service';
 import { parseDeviceContext } from '../../common/utils/device.util';
+import { lookupGeoLocation } from '../../common/utils/geoip.util';
 
 @Injectable()
 export class AuthService {
@@ -110,6 +111,11 @@ export class AuthService {
       ipAddress?: string;
       providedDeviceId?: string;
       providedDeviceName?: string;
+      country?: string;
+      province?: string;
+      district?: string;
+      latitude?: number;
+      longitude?: number;
     },
   ): Promise<
     LoginResponseDto & {
@@ -117,6 +123,11 @@ export class AuthService {
       session_id?: string;
       device_id?: string;
       device_name?: string;
+      country?: string;
+      province?: string;
+      district?: string;
+      latitude?: number;
+      longitude?: number;
     }
   > {
     const whereCondition = loginDto.username
@@ -142,7 +153,16 @@ export class AuthService {
     const refreshTtlDays = Number(
       this.configService.get<string>('CUSTOMER_REFRESH_TTL_DAYS', '30'),
     );
-    const parsed = parseDeviceContext(deviceRaw || {});
+    // Always trace location from backend IP
+    const geo = lookupGeoLocation(deviceRaw?.ipAddress || '');
+    const parsed = parseDeviceContext({
+      ...deviceRaw,
+      country: geo.country,
+      province: geo.province,
+      district: geo.district,
+      latitude: geo.latitude,
+      longitude: geo.longitude,
+    });
     const { session, refreshToken } = await this.sessionsService.create({
       customerId: customer.id,
       refreshTtlDays,
@@ -151,6 +171,12 @@ export class AuthService {
       deviceId: parsed.deviceId,
       deviceName: parsed.deviceName,
       metadata: parsed.metadata,
+      country: parsed.country,
+      province: parsed.province,
+      district: parsed.district,
+      latitude: parsed.latitude,
+      longitude: parsed.longitude,
+      geo_location: geo.geo as Record<string, unknown>,
     });
 
     const payload: JwtPayload & { sid: string } = {
@@ -178,6 +204,11 @@ export class AuthService {
       },
       device_id: session.device_id,
       device_name: session.device_name,
+      country: session.country,
+      province: session.province,
+      district: session.district,
+      latitude: session.latitude,
+      longitude: session.longitude,
     };
   }
 

@@ -6,6 +6,11 @@ export interface ParsedDeviceInfo {
   deviceId?: string;
   deviceName?: string;
   metadata?: Record<string, unknown>;
+  country?: string;
+  province?: string;
+  district?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 // Using official type definitions from @types/ua-parser-js eliminates unsafe access.
@@ -15,8 +20,23 @@ export function parseDeviceContext(params: {
   ipAddress?: string;
   providedDeviceId?: string;
   providedDeviceName?: string;
+  country?: string;
+  province?: string;
+  district?: string;
+  latitude?: number;
+  longitude?: number;
 }): ParsedDeviceInfo {
-  const { userAgent, ipAddress, providedDeviceId, providedDeviceName } = params;
+  const {
+    userAgent,
+    ipAddress,
+    providedDeviceId,
+    providedDeviceName,
+    country,
+    province,
+    district,
+    latitude,
+    longitude,
+  } = params;
   if (!userAgent) return {};
 
   // Simple regex-based parsing (avoids external parser & unsafe type warnings)
@@ -92,5 +112,16 @@ export function parseDeviceContext(params: {
     raw: { userAgent },
   };
 
-  return { userAgent, ipAddress, deviceId, deviceName, metadata };
+  return {
+    userAgent,
+    ipAddress,
+    deviceId,
+    deviceName,
+    metadata,
+    country,
+    province,
+    district,
+    latitude,
+    longitude,
+  };
 }
