@@ -8,6 +8,14 @@ import {
   Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import {
+  AuthCustomerRegisterRequestExample,
+  AuthCustomerRegisterResponseExample,
+  AuthLoginUserRequestExample,
+  AuthLoginUserResponseExample,
+  AuthLoginCustomerRequestExample,
+  AuthLoginCustomerResponseExample,
+} from '../../docs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto, CustomerLoginDto, LoginResponseDto } from './dto/auth.dto';
 import {
@@ -29,16 +37,18 @@ export class AuthController {
   @ApiOperation({ summary: 'Register new customer account' })
   @ApiBody({
     description: 'Customer registration payload',
-    schema: {
-      example: {
-        username: 'johndoe',
-        email: 'john@example.com',
-        password: 'CustStr0ng!1',
-        first_name: 'John',
-        last_name: 'Doe',
-        address: '123 Market St',
+    schema: ((): Record<string, unknown> => ({
+      type: 'object',
+      properties: {
+        username: { type: 'string' },
+        email: { type: 'string' },
+        password: { type: 'string' },
+        first_name: { type: 'string' },
+        last_name: { type: 'string' },
+        address: { type: 'string' },
       },
-    },
+      example: AuthCustomerRegisterRequestExample,
+    }))(),
   })
   @ApiResponse({
     status: 200,
@@ -48,23 +58,7 @@ export class AuthController {
   @ApiResponse({
     status: 200,
     description: 'Customer created (example)',
-    schema: {
-      example: {
-        is_error: false,
-        code: 'SUCCESS',
-        message: 'Customer registered',
-        data: {
-          id: '6d1f2e1a-b123-4c89-9d10-aaaaaaaaaaaa',
-          username: 'johndoe',
-          email: 'john@example.com',
-          first_name: 'John',
-          last_name: 'Doe',
-          wallet_id: '0f9c2d34-7a1b-4c56-9a12-bbbbbbbbbbbb',
-        },
-        error: null,
-        status_code: 200,
-      },
-    },
+    schema: { example: AuthCustomerRegisterResponseExample },
   })
   @ApiResponse({ status: 409, description: 'Username or email already taken' })
   async registerCustomer(
@@ -82,31 +76,19 @@ export class AuthController {
   @ApiOperation({ summary: 'Admin/User login' })
   @ApiBody({
     description: 'Credentials for admin/user login',
-    schema: {
-      example: {
-        username: 'admin',
-        password: 'P@ssw0rd!',
+    schema: ((): Record<string, unknown> => ({
+      type: 'object',
+      properties: {
+        username: { type: 'string' },
+        password: { type: 'string' },
       },
-    },
+      example: AuthLoginUserRequestExample,
+    }))(),
   })
   @ApiResponse({
     status: 200,
     description: 'Login successful',
-    schema: {
-      example: {
-        is_error: false,
-        code: 'SUCCESS',
-        message: 'Login successful',
-        data: {
-          access_token: 'xxx.yyy.zzz',
-          token_type: 'bearer',
-          expires_in: 3600,
-          user: { id: 'uuid', username: 'admin', role: 'admin' },
-        },
-        error: null,
-        status_code: 200,
-      },
-    },
+    schema: { example: AuthLoginUserResponseExample },
   })
   @ApiResponse({ status: 400, description: 'Validation error' })
   async loginUser(
@@ -123,36 +105,20 @@ export class AuthController {
   @Post('customer/login')
   @ApiOperation({ summary: 'Customer login' })
   @ApiBody({
-    description: 'Credentials for admin/user login',
-    schema: {
-      example: {
-        email: 'john@example.com',
-        password: 'CustStr0ng!1',
+    description: 'Credentials for customer login',
+    schema: ((): Record<string, unknown> => ({
+      type: 'object',
+      properties: {
+        email: { type: 'string' },
+        password: { type: 'string' },
       },
-    },
+      example: AuthLoginCustomerRequestExample,
+    }))(),
   })
   @ApiResponse({
     status: 200,
     description: 'Login successful',
-    schema: {
-      example: {
-        is_error: false,
-        code: 'SUCCESS',
-        message: 'Login successful',
-        data: {
-          access_token: 'xxx.yyy.zzz',
-          token_type: 'bearer',
-          expires_in: 3600,
-          customer: {
-            id: 'uuid',
-            username: 'john_doe',
-            email: 'john@example.com',
-          },
-        },
-        error: null,
-        status_code: 200,
-      },
-    },
+    schema: { example: AuthLoginCustomerResponseExample },
   })
   @ApiResponse({ status: 400, description: 'Validation error' })
   async loginCustomer(

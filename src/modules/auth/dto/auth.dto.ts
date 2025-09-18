@@ -10,6 +10,11 @@ import {
   ValidationArguments,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  AuthLoginResponseUserExample,
+  AuthLoginResponseCustomerExample,
+  AuthAccessTokenExample,
+} from '../../../docs/swagger';
 
 export class LoginDto {
   @ApiProperty({
@@ -74,7 +79,7 @@ Validate(UsernameOrEmailConstraint)(CustomerLoginDto.prototype, 'username');
 
 export class LoginResponseDto {
   @ApiProperty({
-    example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+    example: AuthAccessTokenExample,
     description: 'JWT access token',
   })
   access_token: string;
@@ -89,11 +94,7 @@ export class LoginResponseDto {
   })
   expires_in: number;
   @ApiPropertyOptional({
-    example: {
-      id: 'c6c1a9c8-1234-4d7b-9f10-111111111111',
-      username: 'admin',
-      role: 'admin',
-    },
+    example: AuthLoginResponseUserExample,
     description: 'Returned when logging in as an admin/user',
   })
   user?: {
@@ -102,11 +103,7 @@ export class LoginResponseDto {
     role?: string;
   };
   @ApiPropertyOptional({
-    example: {
-      id: '9b4e0e04-aaaa-4fa9-bbbb-222222222222',
-      username: 'john_doe',
-      email: 'john@example.com',
-    },
+    example: AuthLoginResponseCustomerExample,
     description: 'Returned when logging in as a customer',
   })
   customer?: {

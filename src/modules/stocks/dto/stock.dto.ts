@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { StockCategoryEmbeddedExample } from '../../../docs/swagger';
 
 export class CreateStockDto {
   @ApiProperty({ example: 'Apple Inc.', description: 'Full stock name' })
@@ -85,7 +86,7 @@ export class StockResponseDto {
   @ApiProperty({ example: 175.34, description: 'Last price' })
   last_price: number;
   @ApiPropertyOptional({
-    example: { id: '77777777-8888-9999-aaaa-bbbbbbbbbbbb', name: 'Technology' },
+    example: StockCategoryEmbeddedExample,
     description: 'Category object if related category is loaded',
   })
   stockCategory?: {

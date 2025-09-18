@@ -205,6 +205,23 @@ const positions = await ibService.getPositions(accountId);
    # Development
    npm run start:dev
    
+
+   #### Centralized Examples
+   Rich request/response examples are now centralized under:
+
+   `src/docs/swagger/examples/`
+
+   Domain specific example constants (e.g. auth, stocks, customers service apply) are imported into controllers or DTOs instead of embedding large mock objects inline. This keeps source files lean and makes it easier to update mock data in one place.
+
+   Controllers refactored so far: `auth.controller.ts`, `stocks.controller.ts`, `customer-services.controller.ts`.
+
+   Add new examples:
+   1. Create a `*.examples.ts` file in `src/docs/swagger/examples/`
+   2. Export constants
+   3. Re-export via `src/docs/swagger/index.ts`
+   4. Import in controller/DTO and reference in `@ApiBody` / `@ApiResponse` decorators.
+
+   Avoid putting large `example:` objects directly in DTOs—prefer centralized constants unless the example is a single scalar.
    # Production
    npm run build
    npm run start:prod

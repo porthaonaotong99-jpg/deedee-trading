@@ -19,6 +19,19 @@ import {
   ApiBody,
   ApiQuery,
 } from '@nestjs/swagger';
+import {
+  StocksListResponseExample,
+  StockGetOneResponseExample,
+  StockCreateRequestExample,
+  StockCreateResponseExample,
+  StockUpdateRequestExample,
+  StockUpdateResponseExample,
+  StockDeleteResponseExample,
+  StockBuyRequestExample,
+  StockBuyResponseExample,
+  StockSellRequestExample,
+  StockSellResponseExample,
+} from '../../docs/swagger';
 import { StocksService } from './stocks.service';
 import {
   CreateStockDto,
@@ -75,39 +88,7 @@ export class StocksController {
   @ApiResponse({
     status: 200,
     description: 'Paginated list returned',
-    schema: {
-      example: {
-        is_error: false,
-        code: 'SUCCESS',
-        message: 'Stocks fetched',
-        total: 2,
-        data: [
-          {
-            id: 'uuid1',
-            name: 'Apple Inc.',
-            symbol: 'AAPL',
-            last_price: 175.34,
-            stockCategory: { id: 'cat-uuid', name: 'Technology' },
-            created_at: '2025-01-01T10:00:00.000Z',
-            updated_at: '2025-01-05T12:00:00.000Z',
-          },
-          {
-            id: 'uuid2',
-            name: 'Microsoft Corp.',
-            symbol: 'MSFT',
-            last_price: 402.11,
-            stockCategory: { id: 'cat-uuid', name: 'Technology' },
-            created_at: '2025-01-02T10:00:00.000Z',
-            updated_at: '2025-01-06T12:00:00.000Z',
-          },
-        ],
-        error: null,
-        status_code: 200,
-        page: 1,
-        limit: 10,
-        totalPages: 1,
-      },
-    },
+    schema: { example: StocksListResponseExample },
   })
   async findAll(@Query() query: PaginationOptions): Promise<
     IManyResponse<StockResponseDto> & {
@@ -135,24 +116,7 @@ export class StocksController {
   @ApiResponse({
     status: 200,
     description: 'Stock found',
-    schema: {
-      example: {
-        is_error: false,
-        code: 'SUCCESS',
-        message: 'Stock found',
-        data: {
-          id: 'uuid1',
-          name: 'Apple Inc.',
-          symbol: 'AAPL',
-          last_price: 175.34,
-          stockCategory: { id: 'cat-uuid', name: 'Technology' },
-          created_at: '2025-01-01T10:00:00.000Z',
-          updated_at: '2025-01-05T12:00:00.000Z',
-        },
-        error: null,
-        status_code: 200,
-      },
-    },
+    schema: { example: StockGetOneResponseExample },
   })
   @ApiResponse({ status: 404, description: 'Stock not found' })
   async findOne(
@@ -166,36 +130,21 @@ export class StocksController {
   @ApiOperation({ summary: 'Create new stock' })
   @ApiBody({
     description: 'Create stock payload',
-    schema: {
-      example: {
-        name: 'Apple Inc.',
-        symbol: 'AAPL',
-        last_price: 175.34,
-        stock_categories_id: '77777777-8888-9999-aaaa-bbbbbbbbbbbb',
+    schema: ((): Record<string, unknown> => ({
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        symbol: { type: 'string' },
+        last_price: { type: 'number' },
+        stock_categories_id: { type: 'string' },
       },
-    },
+      example: StockCreateRequestExample,
+    }))(),
   })
   @ApiResponse({
     status: 200,
     description: 'Stock created',
-    schema: {
-      example: {
-        is_error: false,
-        code: 'SUCCESS',
-        message: 'Stock created',
-        data: {
-          id: 'new-uuid',
-          name: 'Apple Inc.',
-          symbol: 'AAPL',
-          last_price: 175.34,
-          stockCategory: { id: 'cat-uuid', name: 'Technology' },
-          created_at: '2025-01-10T10:00:00.000Z',
-          updated_at: '2025-01-10T10:00:00.000Z',
-        },
-        error: null,
-        status_code: 200,
-      },
-    },
+    schema: { example: StockCreateResponseExample },
   })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @UseGuards(PermissionsGuard)
@@ -215,34 +164,19 @@ export class StocksController {
   @ApiOperation({ summary: 'Update a stock by id' })
   @ApiBody({
     description: 'Update stock payload (partial)',
-    schema: {
-      example: {
-        name: 'Apple Inc. (Updated)',
-        last_price: 180.0,
+    schema: ((): Record<string, unknown> => ({
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        last_price: { type: 'number' },
       },
-    },
+      example: StockUpdateRequestExample,
+    }))(),
   })
   @ApiResponse({
     status: 200,
     description: 'Stock updated',
-    schema: {
-      example: {
-        is_error: false,
-        code: 'SUCCESS',
-        message: 'Stock updated',
-        data: {
-          id: 'uuid1',
-          name: 'Apple Inc. (Updated)',
-          symbol: 'AAPL',
-          last_price: 180.0,
-          stockCategory: { id: 'cat-uuid', name: 'Technology' },
-          created_at: '2025-01-01T10:00:00.000Z',
-          updated_at: '2025-01-11T12:00:00.000Z',
-        },
-        error: null,
-        status_code: 200,
-      },
-    },
+    schema: { example: StockUpdateResponseExample },
   })
   @ApiResponse({ status: 404, description: 'Stock not found' })
   @UseGuards(PermissionsGuard)
@@ -260,16 +194,7 @@ export class StocksController {
   @ApiResponse({
     status: 200,
     description: 'Stock deleted',
-    schema: {
-      example: {
-        is_error: false,
-        code: 'SUCCESS',
-        message: 'Stock deleted',
-        data: null,
-        error: null,
-        status_code: 200,
-      },
-    },
+    schema: { example: StockDeleteResponseExample },
   })
   @ApiResponse({ status: 404, description: 'Stock not found' })
   @UseGuards(PermissionsGuard)
@@ -285,30 +210,20 @@ export class StocksController {
   @ApiOperation({ summary: 'Customer buys stock' })
   @ApiBody({
     description: 'Buy stock payload',
-    schema: {
-      example: {
-        stock_id: '11111111-2222-3333-4444-555555555555',
-        quantity: 10,
-        buy_price: 175.5,
+    schema: ((): Record<string, unknown> => ({
+      type: 'object',
+      properties: {
+        stock_id: { type: 'string' },
+        quantity: { type: 'number' },
+        buy_price: { type: 'number' },
       },
-    },
+      example: StockBuyRequestExample,
+    }))(),
   })
   @ApiResponse({
     status: 200,
     description: 'Buy executed',
-    schema: {
-      example: {
-        is_error: false,
-        code: 'SUCCESS',
-        message: 'Successfully bought 10 shares of AAPL',
-        data: {
-          success: true,
-          message: 'Successfully bought 10 shares of AAPL',
-        },
-        error: null,
-        status_code: 200,
-      },
-    },
+    schema: { example: StockBuyResponseExample },
   })
   @ApiResponse({ status: 400, description: 'Validation / business error' })
   async buyStock(
@@ -326,30 +241,20 @@ export class StocksController {
   @ApiOperation({ summary: 'Customer sells stock' })
   @ApiBody({
     description: 'Sell stock payload',
-    schema: {
-      example: {
-        stock_id: '11111111-2222-3333-4444-555555555555',
-        quantity: 5,
-        sell_price: 180.25,
+    schema: ((): Record<string, unknown> => ({
+      type: 'object',
+      properties: {
+        stock_id: { type: 'string' },
+        quantity: { type: 'number' },
+        sell_price: { type: 'number' },
       },
-    },
+      example: StockSellRequestExample,
+    }))(),
   })
   @ApiResponse({
     status: 200,
     description: 'Sell executed',
-    schema: {
-      example: {
-        is_error: false,
-        code: 'SUCCESS',
-        message: 'Successfully sold 5 shares of AAPL',
-        data: {
-          success: true,
-          message: 'Successfully sold 5 shares of AAPL',
-        },
-        error: null,
-        status_code: 200,
-      },
-    },
+    schema: { example: StockSellResponseExample },
   })
   @ApiResponse({ status: 400, description: 'Validation / business error' })
   async sellStock(
