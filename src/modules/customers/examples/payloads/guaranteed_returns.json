@@ -1,0 +1,49 @@
+{
+  "service_type": "guaranteed_returns",
+  "kyc": {
+    "dob": "1979-09-09",
+    "nationality": "LA",
+    "marital_status": "married",
+    "employment_status": "self_employed",
+    "annual_income": 150000,
+    "employer_name": "Mekong Capital Partners",
+    "occupation": "fund_manager",
+    "investment_experience": 12,
+    "dependent_number": 3,
+    "source_of_funds": "business_proceeds",
+    "risk_tolerance": "medium",
+    "pep_flag": false,
+    "tax_id": "LA-INV-559900",
+    "fatca_status": "non_us_person"
+  },
+  "address": {
+    "country_id": "LA",
+    "province_id": "LA-XA",
+    "district_id": "LA-XA-03",
+    "village": "Ban Sisavath",
+    "address_line": "Villa 4, Riverside",
+    "postal_code": "15020"
+  },
+  "documents": [
+    {
+      "doc_type": "identity_front",
+      "storage_ref": "s3://kyc-docs/gr001/id-front.png"
+    },
+    {
+      "doc_type": "identity_back",
+      "storage_ref": "s3://kyc-docs/gr001/id-back.png"
+    },
+    {
+      "doc_type": "bank_statement",
+      "storage_ref": "s3://kyc-docs/gr001/bank-statement-q2.pdf"
+    },
+    {
+      "doc_type": "address_proof",
+      "storage_ref": "s3://kyc-docs/gr001/lease.pdf"
+    },
+    {
+      "doc_type": "selfie",
+      "storage_ref": "s3://kyc-docs/gr001/selfie.jpg"
+    }
+  ]
+}

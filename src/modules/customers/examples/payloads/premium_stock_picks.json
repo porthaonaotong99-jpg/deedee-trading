@@ -1,0 +1,17 @@
+{
+  "service_type": "premium_stock_picks",
+  "kyc": {
+    "dob": "1992-11-03",
+    "nationality": "LA",
+    "risk_tolerance": "high",
+    "investment_experience": 4
+  },
+  "address": {
+    "country_id": "LA",
+    "province_id": "LA-XI",
+    "district_id": "LA-XI-01",
+    "village": "Ban Thongkang",
+    "address_line": "19 Riverside Lane",
+    "postal_code": "01005"
+  }
+}

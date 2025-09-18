@@ -1,0 +1,46 @@
+{
+  "service_type": "international_stock_account",
+  "kyc": {
+    "dob": "1988-03-21",
+    "nationality": "TH",
+    "marital_status": "single",
+    "employment_status": "employed",
+    "annual_income": 62000,
+    "employer_name": "Siam Finance Group",
+    "occupation": "research_analyst",
+    "investment_experience": 6,
+    "dependent_number": 0,
+    "source_of_funds": "salary_savings",
+    "risk_tolerance": "high",
+    "pep_flag": false,
+    "tax_id": "TH-778812349",
+    "fatca_status": "non_us_person"
+  },
+  "address": {
+    "country_id": "TH",
+    "province_id": "TH-10",
+    "district_id": "TH-10-05",
+    "village": "Sukhumvit Soi 24",
+    "address_line": "Condo 88/19, Floor 12",
+    "postal_code": "10110"
+  },
+  "documents": [
+    {
+      "doc_type": "identity_front",
+      "storage_ref": "s3://kyc-docs/intl001/id-front.jpg",
+      "checksum": "aabbccddeeff11223344556677889900aabbccddeeff11223344556677889900"
+    },
+    {
+      "doc_type": "identity_back",
+      "storage_ref": "s3://kyc-docs/intl001/id-back.jpg"
+    },
+    {
+      "doc_type": "address_proof",
+      "storage_ref": "s3://kyc-docs/intl001/utility-may.pdf"
+    },
+    {
+      "doc_type": "selfie",
+      "storage_ref": "s3://kyc-docs/intl001/selfie.jpg"
+    }
+  ]
+}

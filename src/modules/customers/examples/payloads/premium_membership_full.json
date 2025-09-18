@@ -1,0 +1,22 @@
+{
+  "service_type": "premium_membership",
+  "kyc": {
+    "dob": "1996-05-12",
+    "nationality": "LA",
+    "risk_tolerance": "medium"
+  },
+  "address": {
+    "country_id": "LA",
+    "province_id": "LA-VT",
+    "district_id": "LA-VT-02",
+    "village": "Ban Saphanthong",
+    "address_line": "Block B, Apartment 204",
+    "postal_code": "01015"
+  },
+  "documents": [
+    {
+      "doc_type": "identity_front",
+      "storage_ref": "s3://kyc-docs/cust789/id-front.png"
+    }
+  ]
+}
