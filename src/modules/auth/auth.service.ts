@@ -244,15 +244,20 @@ export class AuthService {
     last_name?: string;
     wallet_id: string;
   }> {
+    // Basic password strength validation (length + character class diversity)
+    this.ensurePasswordStrength(dto.password);
     // Ensure uniqueness on username or email
+    const normalizedUsername = dto.username.trim();
+    const normalizedEmail = dto.email.trim().toLowerCase();
+
     const existingByUsername = await this.customerRepository.findOne({
-      where: { username: dto.username },
+      where: { username: normalizedUsername },
     });
     if (existingByUsername) {
       throw new ConflictException('Username already taken');
     }
     const existingByEmail = await this.customerRepository.findOne({
-      where: { email: dto.email },
+      where: { email: normalizedEmail },
     });
     if (existingByEmail) {
       throw new ConflictException('Email already registered');
@@ -260,14 +265,27 @@ export class AuthService {
 
     const hashed = await this.hashPassword(dto.password);
     const entity = this.customerRepository.create({
-      username: dto.username,
-      email: dto.email,
+      username: normalizedUsername,
+      email: normalizedEmail,
       password: hashed,
-      first_name: dto.first_name,
-      last_name: dto.last_name,
-      address: dto.address,
+      first_name: dto.first_name?.trim(),
+      last_name: dto.last_name?.trim(),
     });
-    const saved = await this.customerRepository.save(entity);
+    let saved: Customer;
+    try {
+      saved = await this.customerRepository.save(entity);
+    } catch (err: unknown) {
+      // Handle potential race condition on unique username/email (Postgres 23505)
+      if (
+        typeof err === 'object' &&
+        err &&
+        'code' in err &&
+        (err as { code?: string }).code === '23505'
+      ) {
+        throw new ConflictException('Username or email already exists');
+      }
+      throw err;
+    }
 
     // Create wallet for this customer (idempotent assumption: first creation only)
     const wallet = await this.walletsService.create({ customerId: saved.id });
@@ -280,6 +298,27 @@ export class AuthService {
       last_name: saved.last_name,
       wallet_id: wallet.id,
     };
+  }
+
+  // --- Password Strength Helper ---
+  private ensurePasswordStrength(password: string) {
+    const minLength = 10; // increase if policy requires
+    if (!password || password.length < minLength) {
+      throw new ConflictException(
+        `Password too weak: must be at least ${minLength} characters`,
+      );
+    }
+    const classes = [
+      /[a-z]/.test(password),
+      /[A-Z]/.test(password),
+      /[0-9]/.test(password),
+      /[^A-Za-z0-9]/.test(password),
+    ].filter(Boolean).length;
+    if (classes < 3) {
+      throw new ConflictException(
+        'Password too weak: include at least three of lowercase, uppercase, number, symbol',
+      );
+    }
   }
 
   // --- Session & Refresh Token Management ---

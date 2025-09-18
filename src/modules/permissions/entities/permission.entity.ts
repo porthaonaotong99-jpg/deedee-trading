@@ -14,8 +14,11 @@ export class Permission {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'varchar', nullable: false })
+  @Column({ type: 'varchar', nullable: false, unique: true })
   name: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  description: string;
 
   @Column({ type: 'varchar', nullable: true })
   group_name: string;

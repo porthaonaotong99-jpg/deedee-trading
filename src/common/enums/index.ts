@@ -1,3 +1,17 @@
+export enum EmploymentStatus {
+  EMPLOYED = 'employed',
+  SELF_EMPLOYED = 'self_employed',
+  UNEMPLOYED = 'unemployed',
+  RETIRED = 'retired',
+  STUDENT = 'student',
+}
+
+export enum MaritalStatus {
+  SINGLE = 'single',
+  MARRIED = 'married',
+  DIVORCED = 'divorced',
+  WIDOWED = 'widowed',
+}
 export enum UserStatus {
   ACTIVE = 'active',
   INACTIVE = 'inactive',
@@ -67,4 +81,18 @@ export enum Gender {
   MALE = 'male',
   FEMALE = 'female',
   OTHER = 'other',
+}
+
+export enum InvestmentInfoStatus {
+  PENDING = 'pending',
+  CANCELLED = 'cancelled',
+  INVESTING = 'investing',
+  REJECTED = 'rejected',
+  COMPLETED = 'completed',
+}
+
+export enum RiskTolerance {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
 }

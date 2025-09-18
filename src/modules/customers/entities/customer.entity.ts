@@ -4,20 +4,22 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
-  ManyToOne,
-  JoinColumn,
   OneToMany,
   OneToOne,
+  Index,
 } from 'typeorm';
 import { CustomerStatus } from '../../../common/enums';
-import { User } from '../../users/entities/user.entity';
 import { AuditLog } from 'src/modules/audit-logs/entities/audit-log.entity';
 import { TransferHistory } from 'src/modules/transfer-history/entities/transfer-history.entity';
 import { Wallet } from 'src/modules/wallets/entities/wallet.entity';
 import { CustomerStock } from 'src/modules/customer-stocks/entities/customer-stock.entity';
 import { StockTransaction } from 'src/modules/stock-transactions/entities/stock-transaction.entity';
+import { CustomerKyc } from './customer-kyc.entity';
+import { CustomerDocument } from './customer-document.entity';
+import { CustomerAddress } from './customer-address.entity';
 
 @Entity('customers')
+@Index('uq_customers_username', ['username'], { unique: true })
 export class Customer {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -28,17 +30,19 @@ export class Customer {
   @Column({ type: 'varchar', nullable: true })
   last_name: string;
 
-  @Column({ type: 'varchar', nullable: true })
-  username: string;
+  @Column({ type: 'varchar', nullable: false })
+  username: string; // uniqueness enforced by uq_customers_username index
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: 'varchar', nullable: false })
   password: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ type: 'varchar', nullable: false })
   email: string;
 
   @Column({ type: 'varchar', nullable: true })
-  address: string;
+  phone_number: string;
+
+  // (All extended KYC, address & document fields moved to their own tables)
 
   @Column({
     type: 'enum',
@@ -53,14 +57,7 @@ export class Customer {
   @Column({ type: 'varchar', nullable: true })
   profile: string;
 
-  @Column({ type: 'varchar', nullable: true })
-  identify_front: string;
-
-  @Column({ type: 'varchar', nullable: true })
-  identify_back: string;
-
-  @Column({ type: 'uuid', nullable: true })
-  created_by: string;
+  // Identity document references moved to customer_documents
 
   @Column({ type: 'uuid', nullable: true })
   deleted_by: string;
@@ -72,10 +69,6 @@ export class Customer {
   updated_at: Date;
 
   // Relations
-  @ManyToOne(() => User, { nullable: true })
-  @JoinColumn({ name: 'created_by' })
-  createdByUser: User;
-
   @OneToMany(() => AuditLog, 'customer')
   auditLogs: AuditLog[];
 
@@ -90,4 +83,14 @@ export class Customer {
 
   @OneToMany(() => StockTransaction, 'customer')
   stockTransactions: StockTransaction[];
+
+  // New split relations
+  @OneToMany(() => CustomerKyc, (kyc) => kyc.customer)
+  kycRecords: CustomerKyc[];
+
+  @OneToMany(() => CustomerDocument, (doc) => doc.customer)
+  documents: CustomerDocument[];
+
+  @OneToMany(() => CustomerAddress, (addr) => addr.customer)
+  addresses: CustomerAddress[];
 }
