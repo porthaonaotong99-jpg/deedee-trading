@@ -126,7 +126,8 @@ export class CustomerServicesController {
     const response: ApplyServiceResponseDto = {
       status: result.status,
       service_type: dto.service_type,
-      kyc_level: (result.kyc && result.kyc.kyc_level) || undefined,
+      kyc_level:
+        'kyc' in result && result.kyc ? result.kyc.kyc_level : undefined,
     };
     return handleSuccessOne({ data: response, message: 'Service processed' });
   }

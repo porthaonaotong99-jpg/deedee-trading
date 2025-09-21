@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Customer } from './entities/customer.entity';
 import {
   CustomerService,
@@ -46,6 +46,7 @@ export class CustomersService {
     private readonly customerAddressRepo: Repository<CustomerAddress>,
     @InjectRepository(CustomerDocument)
     private readonly customerDocumentRepo: Repository<CustomerDocument>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(dto: CreateCustomerDto) {
@@ -176,18 +177,19 @@ export class CustomersService {
       }[];
     },
   ) {
-    // Idempotent: if already active return existing
+    // 1. Early idempotency check (outside transaction for fast path)
     const existing = await this.customerServiceRepo.findOne({
       where: { customer_id: customerId, service_type: serviceType },
     });
     if (existing) {
       return { service: existing, status: 'already_active' };
     }
+
+    // 2. Configuration lookup
     const cfg = this.requiredConfig[serviceType];
-    if (!cfg) {
-      throw new BadRequestException('Unsupported service');
-    }
-    // Find existing approved KYC with sufficient level
+    if (!cfg) throw new BadRequestException('Unsupported service');
+
+    // 3. Fetch existing approved KYCs & determine sufficiency
     const kycs = await this.customerKycRepo.find({
       where: { customer_id: customerId, status: KycStatus.APPROVED },
       order: { created_at: 'DESC' },
@@ -195,86 +197,116 @@ export class CustomersService {
     const sufficient = kycs.find(
       (k) => this.kycLevelOrder(k.kyc_level) >= this.kycLevelOrder(cfg.level),
     );
+    const needsNewKyc = !sufficient;
 
-    let kycRecord = sufficient;
-    if (!kycRecord) {
-      // Need to create new KYC (auto-approve policy for now)
+    // 4. Pre-validate KYC fields if a new KYC will be needed
+    if (needsNewKyc) {
       if (!payload?.kyc) {
         throw new BadRequestException('KYC data required for this service');
       }
-      // Validate required fields presence
-      const missing = cfg.requiredFields.filter(
+      const missingFields = cfg.requiredFields.filter(
         (f) => (payload.kyc as Record<string, unknown>)[f] == null,
       );
-      if (missing.length) {
+      if (missingFields.length) {
         throw new BadRequestException(
-          `Missing required KYC fields: ${missing.join(', ')}`,
+          `Missing required KYC fields: ${missingFields.join(', ')}`,
         );
       }
-      kycRecord = this.customerKycRepo.create({
-        customer_id: customerId,
-        kyc_level: cfg.level,
-        status: KycStatus.APPROVED, // future: set PENDING and add review flow
-        ...payload.kyc,
-        submitted_at: new Date(),
-        reviewed_at: new Date(),
-      });
-      kycRecord = await this.customerKycRepo.save(kycRecord);
     }
 
-    // Upsert primary address if provided
-    if (payload?.address) {
-      let primary = await this.customerAddressRepo.findOne({
-        where: { customer_id: customerId, is_primary: true },
-      });
-      if (!primary) {
-        primary = this.customerAddressRepo.create({
-          customer_id: customerId,
-          is_primary: true,
-          ...payload.address,
-        });
-      } else {
-        Object.assign(primary, payload.address);
-      }
-      await this.customerAddressRepo.save(primary);
-    }
-
-    // Documents (metadata only here)
-    if (payload?.documents?.length) {
-      const docs: CustomerDocument[] = payload.documents.map((d) =>
-        this.customerDocumentRepo.create({
-          customer_id: customerId,
-          kyc_id: kycRecord?.id,
-          doc_type: d.doc_type,
-          storage_ref: d.storage_ref,
-          checksum: d.checksum || null,
-          encrypted: false,
-          metadata: null,
-        }),
-      );
-      await this.customerDocumentRepo.save(docs);
-    }
-
-    // Validate document presence for required docs (simple presence check by doc_type)
+    // 5. Pre-validate required documents BEFORE starting transaction (to avoid unnecessary writes)
     if (cfg.requiredDocs.length) {
-      const allDocs = await this.customerDocumentRepo.find({
+      const existingDocs = await this.customerDocumentRepo.find({
         where: { customer_id: customerId },
       });
-      const haveTypes = new Set(allDocs.map((d) => d.doc_type));
-      const missingDocs = cfg.requiredDocs.filter((rt) => !haveTypes.has(rt));
-      if (missingDocs.length) {
+      const existingDocTypes = new Set(existingDocs.map((d) => d.doc_type));
+      const incomingDocTypes = new Set(
+        (payload?.documents || []).map((d) => d.doc_type),
+      );
+      const combined = new Set<CustomerDocumentType>([
+        ...existingDocTypes,
+        ...incomingDocTypes,
+      ]);
+      const stillMissing = cfg.requiredDocs.filter((rt) => !combined.has(rt));
+      if (stillMissing.length) {
         throw new BadRequestException(
-          `Missing required documents: ${missingDocs.join(', ')}`,
+          `Missing required documents: ${stillMissing.join(', ')}`,
         );
       }
     }
 
-    const service = this.customerServiceRepo.create({
-      customer_id: customerId,
-      service_type: serviceType,
-      active: true,
+    // 6. Transactional execution to ensure atomicity for all writes
+    return this.dataSource.transaction(async (manager) => {
+      // Re-check for race condition inside transaction (another tx may have created it)
+      const existingInside = await manager
+        .getRepository(CustomerService)
+        .findOne({
+          where: { customer_id: customerId, service_type: serviceType },
+        });
+      if (existingInside) {
+        return { service: existingInside, status: 'already_active' };
+      }
+
+      // (a) KYC (create if required)
+      let kycRecord = sufficient;
+      if (!kycRecord) {
+        kycRecord = manager.getRepository(CustomerKyc).create({
+          customer_id: customerId,
+          kyc_level: cfg.level,
+          status: KycStatus.APPROVED, // TODO: future review flow (PENDING)
+          ...payload?.kyc,
+          submitted_at: new Date(),
+          reviewed_at: new Date(),
+        });
+        kycRecord = await manager.getRepository(CustomerKyc).save(kycRecord);
+      }
+
+      // (b) Upsert primary address
+      if (payload?.address) {
+        const addressRepo = manager.getRepository(CustomerAddress);
+        let primary = await addressRepo.findOne({
+          where: { customer_id: customerId, is_primary: true },
+        });
+        if (!primary) {
+          primary = addressRepo.create({
+            customer_id: customerId,
+            is_primary: true,
+            ...payload.address,
+          });
+        } else {
+          Object.assign(primary, payload.address);
+        }
+        await addressRepo.save(primary);
+      }
+
+      // (c) Documents (only those provided in this request)
+      if (payload?.documents?.length) {
+        const docRepo = manager.getRepository(CustomerDocument);
+        const docs: CustomerDocument[] = payload.documents.map((d) =>
+          docRepo.create({
+            customer_id: customerId,
+            kyc_id: kycRecord?.id,
+            doc_type: d.doc_type,
+            storage_ref: d.storage_ref,
+            checksum: d.checksum || null,
+            encrypted: false,
+            metadata: null,
+          }),
+        );
+        await docRepo.save(docs);
+      }
+
+      // (d) Service activation
+      const service = manager.getRepository(CustomerService).create({
+        customer_id: customerId,
+        service_type: serviceType,
+        active: true,
+      });
+      const savedService = await manager
+        .getRepository(CustomerService)
+        .save(service);
+
+      return { service: savedService, kyc: kycRecord, status: 'activated' };
     });
-    const savedService = await this.customerServiceRepo.save(service);
-    return { service: savedService, kyc: kycRecord, status: 'activated' };
   }
 }
