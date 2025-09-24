@@ -5,6 +5,7 @@ import {
   Body,
   UseGuards,
   ValidationPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -13,8 +14,10 @@ import {
   ApiBody,
   ApiExtraModels,
   ApiResponse,
+  ApiQuery,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtCustomerAuthGuard } from '../auth/guards/jwt-customer.guard';
+import { JwtUserAuthGuard } from '../auth/guards/jwt-user.guard';
 import { CustomersService } from './customers.service';
 import {
   ApplyServiceDto,
@@ -35,25 +38,28 @@ import {
   ServiceApplyErrorExamples,
   ServiceEnumDescription,
 } from './swagger/service-apply.examples';
+import { ServiceApproveResponseExamples } from './swagger/service-approve.examples';
+import { Query } from '@nestjs/common';
+import { KycLevel, KycStatus } from './entities/customer-kyc.entity';
 
 @ApiTags('customer-services')
 @ApiExtraModels(ApplyServiceDto, ApplyServiceResponseDto)
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('customers/services')
 export class CustomerServicesController {
   constructor(private readonly customersService: CustomersService) {}
 
-  @Get()
+  @UseGuards(JwtCustomerAuthGuard)
+  @Get('list')
   @ApiOperation({ summary: 'List customer services (self)' })
   async list(@AuthUser() user: JwtPayload) {
-    if (user.type !== 'customer') {
-      return handleSuccessOne({ data: [], message: 'Forbidden' });
-    }
+    // Guard already enforces token type; extra check defensive only
+    if (user.type !== 'customer') throw new ForbiddenException();
     const data = await this.customersService.listServices(user.sub);
     return handleSuccessOne({ data, message: 'Services fetched' });
   }
 
+  @UseGuards(JwtCustomerAuthGuard)
   @Post('apply')
   @ApiOperation({
     summary: 'Apply for a service (with inline KYC if needed)',
@@ -87,7 +93,7 @@ export class CustomerServicesController {
     @Body(ValidationPipe) dto: ApplyServiceDto,
   ) {
     if (user.type !== 'customer') {
-      return handleSuccessOne({ data: null, message: 'Forbidden' });
+      throw new ForbiddenException();
     }
     const kycPayload: Partial<CustomerKyc> | undefined = dto.kyc
       ? {
@@ -130,5 +136,141 @@ export class CustomerServicesController {
         'kyc' in result && result.kyc ? result.kyc.kyc_level : undefined,
     };
     return handleSuccessOne({ data: response, message: 'Service processed' });
+  }
+
+  @UseGuards(JwtUserAuthGuard)
+  @Post(':serviceId/approve')
+  @ApiOperation({
+    summary: 'Approve a pending service application (internal user only)',
+    description:
+      'Marks associated pending KYC as approved and activates the service. Requires user token (type=user).',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Service approved and activated',
+    schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', example: 'activated' },
+        service_id: { type: 'string', format: 'uuid' },
+        service_type: { type: 'string' },
+        kyc_level: { type: 'string', example: 'brokerage' },
+      },
+    },
+    examples: {
+      success: ServiceApproveResponseExamples.success,
+      alreadyActive: ServiceApproveResponseExamples.alreadyActive,
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'No pending KYC or already active',
+    examples: { noPending: ServiceApproveResponseExamples.noPending },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Service application not found',
+    examples: { notFound: ServiceApproveResponseExamples.notFound },
+  })
+  async approve(
+    @AuthUser() user: JwtPayload,
+    @Body('serviceId') serviceId: string,
+  ) {
+    // Basic admin gate: require internal user token AND roleId placeholder (could be replaced with RBAC later)
+    if (user.type !== 'user') throw new ForbiddenException();
+    const result = await this.customersService.approveService(
+      serviceId,
+      user.sub,
+    );
+    return handleSuccessOne({
+      data: {
+        status: result.status,
+        service_id: result.service.id,
+        service_type: result.service.service_type,
+        kyc_level: result.kyc?.kyc_level,
+      },
+      message: 'Service approval processed',
+    });
+  }
+
+  @UseGuards(JwtUserAuthGuard)
+  @Get('admin/kyc')
+  @ApiOperation({
+    summary: 'List customer KYC records (admin)',
+    description:
+      'Paginated list with optional filters: status, level, customer_id.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (1-based, default 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size (default 20, max 100)',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'KYC status filter',
+    enum: KycStatus,
+  })
+  @ApiQuery({
+    name: 'level',
+    required: false,
+    description:
+      'KYC level filter: accepts basic|advanced|brokerage or numeric 1=basic,2=advanced,3=brokerage',
+  })
+  @ApiQuery({
+    name: 'customer_id',
+    required: false,
+    type: String,
+    description: 'Filter by specific customer UUID',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'KYC records fetched',
+    schema: {
+      type: 'object',
+      properties: {
+        data: { type: 'array', items: { type: 'object' } },
+        total: { type: 'number' },
+        page: { type: 'number' },
+        limit: { type: 'number' },
+        totalPages: { type: 'number' },
+      },
+    },
+  })
+  async listKyc(
+    @AuthUser() user: JwtPayload,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: KycStatus,
+    @Query('level') level?: string,
+    @Query('customer_id') customer_id?: string,
+  ) {
+    if (user.type !== 'user') throw new ForbiddenException();
+    let mappedLevel: KycLevel | undefined;
+    if (level) {
+      if (level === 'basic' || level === 'advanced' || level === 'brokerage') {
+        mappedLevel = level as KycLevel;
+      } else if (/^\d+$/.test(level)) {
+        const num = parseInt(level, 10);
+        if (num === 1) mappedLevel = KycLevel.BASIC;
+        else if (num === 2) mappedLevel = KycLevel.ADVANCED;
+        else if (num === 3) mappedLevel = KycLevel.BROKERAGE;
+      }
+    }
+    const result = await this.customersService.listKyc({
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      status,
+      level: mappedLevel,
+      customer_id,
+    });
+    return handleSuccessOne({ data: result, message: 'KYC records fetched' });
   }
 }

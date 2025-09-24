@@ -99,17 +99,17 @@ export const ServiceApplyResponseExamples = {
   premiumActive: {
     summary: 'Premium active',
     value: {
-      status: 'active',
+      status: 'activated',
       service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
       kyc_level: 'basic',
     },
   },
-  intlAdvanced: {
-    summary: 'International account active',
+  intlPending: {
+    summary: 'International account pending review',
     value: {
-      status: 'active',
+      status: 'pending_review',
       service_type: CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT,
-      kyc_level: 'advanced',
+      kyc_level: 'brokerage',
     },
   },
 };

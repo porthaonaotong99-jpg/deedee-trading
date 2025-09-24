@@ -27,7 +27,7 @@ export const AuthCustomerRegisterResponseExample = {
 
 export const AuthLoginUserRequestExample = {
   username: 'admin',
-  password: 'P@ssw0rd!',
+  password: 'Admin@123',
 };
 
 export const AuthLoginUserResponseExample = {

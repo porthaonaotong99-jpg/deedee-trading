@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import * as argon2 from 'argon2';
 
 const AppDataSource = new DataSource({
   type: 'postgres',
@@ -9,6 +10,7 @@ const AppDataSource = new DataSource({
   database: process.env.DATABASE_NAME || 'trading_db',
 });
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function seedBasePermissions() {
   await AppDataSource.query(`
     INSERT INTO permissions (id, name, description)
@@ -23,6 +25,7 @@ async function seedBasePermissions() {
   `);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function seedTestCustomersAndServices() {
   const customers = await AppDataSource.query<
     {
@@ -78,6 +81,7 @@ async function seedTestCustomersAndServices() {
   await addService('cust_g', 'premium_stock_picks');
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function seedDynamicServicePermissions() {
   await AppDataSource.query(`
     INSERT INTO service_permissions (id, service_type, permission_name)
@@ -278,6 +282,7 @@ const LAOS_PROVINCES: ProvinceSeed[] = [
   },
 ];
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function seedLaosGeography() {
   // Insert country (Lao PDR) if not exists
   const countryRows = await AppDataSource.query<
@@ -542,6 +547,9 @@ async function seed() {
   // await seedDynamicServicePermissions();
   // await seedLaosGeography();
   await seedThailandGeography();
+  if (process.env.SEED_USERS === 'true') {
+    await seedUsersInline();
+  }
   console.log('Seed data inserted successfully');
   await AppDataSource.destroy();
 }
@@ -550,3 +558,39 @@ seed().catch((err) => {
   console.error('Error seeding data:', err);
   process.exit(1);
 });
+
+// Inline user seeding (simpler than reusing separate script logic)
+async function seedUsersInline() {
+  const users: {
+    username: string;
+    password: string;
+    first_name: string;
+    number: string;
+    gender: string;
+  }[] = [
+    {
+      username: process.env.SEED_ADMIN_USERNAME || 'admin',
+      password: process.env.SEED_ADMIN_PASSWORD || 'Admin@123',
+      first_name: 'System',
+      number: 'EMP-0001',
+      gender: 'male',
+    },
+  ];
+  for (const u of users) {
+    const existing = await AppDataSource.query<{ id: string }[]>(
+      'SELECT id FROM users WHERE username = $1 LIMIT 1',
+      [u.username],
+    );
+    if (existing.length) {
+      console.log(`User ${u.username} already exists (inline)`);
+      continue;
+    }
+    const hash = await argon2.hash(u.password); // default argon2 variant
+    await AppDataSource.query(
+      `INSERT INTO users (id, number, first_name, last_name, username, password, gender, tel, address, status, profile, role_id, admin_role_id, created_by, deleted_by, created_at, updated_at)
+       VALUES (gen_random_uuid(), $1, $2, NULL, $3, $4, $5, NULL, NULL, 'active', NULL, NULL, NULL, NULL, NULL, NOW(), NOW())`,
+      [u.number, u.first_name, u.username, hash, u.gender],
+    );
+    console.log(`Inline seeded user ${u.username}`);
+  }
+}

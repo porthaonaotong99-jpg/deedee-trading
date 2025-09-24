@@ -10,6 +10,7 @@ import {
   UseGuards,
   ValidationPipe,
   ParseUUIDPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -98,7 +99,7 @@ export class CustomersController {
     // Only allow when token type is customer
     if (user.type !== 'customer') {
       // Reuse 403 semantics without importing ForbiddenException to keep minimal; could import instead.
-      return handleSuccessOne({ data: null, message: 'Forbidden' });
+      throw new ForbiddenException();
     }
     const data = await this.service.findOne(user.sub);
     return handleSuccessOne({ data, message: 'Customer profile' });

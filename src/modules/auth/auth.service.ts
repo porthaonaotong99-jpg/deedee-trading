@@ -63,10 +63,12 @@ export class AuthService {
   ) {}
 
   async loginUser(loginDto: LoginDto): Promise<LoginResponseDto> {
+    console.log({ loginDto });
     const user = await this.userRepository.findOne({
       where: { username: loginDto.username },
       relations: ['role'],
     });
+    console.log({ user });
 
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
@@ -76,6 +78,7 @@ export class AuthService {
       loginDto.password,
       user.password,
     );
+    console.log({ passwordValid });
     if (!passwordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -226,14 +229,47 @@ export class AuthService {
     plain: string,
     stored: string,
   ): Promise<boolean> {
-    // Detect argon2 hash format (starts with $argon2...)
-    if (stored.startsWith('$argon2')) {
-      return await argon2Verify(stored, plain);
+    const debug = process.env.AUTH_DEBUG === '1';
+    const dbg = (...a: unknown[]) =>
+      debug && console.log('[AUTH:verifyPassword]', ...a);
+    try {
+      dbg('inputs', {
+        plainLength: plain?.length,
+        storedPrefix: stored?.slice(0, 15),
+        storedLength: stored?.length,
+      });
+      if (debug) {
+        const codes = Array.from(plain || '').map((c) => c.charCodeAt(0));
+        dbg('plainCharCodes', codes);
+      }
+      if (!plain || !stored) {
+        dbg('either plain or stored empty');
+        return false;
+      }
+      if (stored.startsWith('$argon2')) {
+        const t0 = Date.now();
+        const ok = await argon2Verify(stored, plain);
+        dbg('argon2.verify', { ok, elapsedMs: Date.now() - t0 });
+        return ok;
+      }
+      if (
+        stored.startsWith('$2a$') ||
+        stored.startsWith('$2b$') ||
+        stored.startsWith('$2y$')
+      ) {
+        const t0 = Date.now();
+        const ok = await bcrypt.compare(plain, stored);
+        dbg('bcrypt.compare', { ok, elapsedMs: Date.now() - t0 });
+        return ok;
+      }
+      dbg('unexpected format (comparing as literal)');
+      const direct = plain === stored;
+      dbg('directStringEquality', direct);
+      return direct;
+    } catch (err) {
+      dbg('error', err);
+      return false;
     }
-    // Fallback to bcrypt for legacy hashes
-    const matches = await bcrypt.compare(plain, stored);
-    // If matches and is legacy, optionally rehash & persist (deferred to avoid side-effects here)
-    return matches;
   }
 
   async registerCustomer(dto: CustomerRegisterDto): Promise<{

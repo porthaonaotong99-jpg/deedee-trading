@@ -250,13 +250,18 @@ export class CustomersService {
       // (a) KYC (create if required)
       let kycRecord = sufficient;
       if (!kycRecord) {
+        // const requiresManualApproval =
+        //   cfg.level === KycLevel.BROKERAGE || cfg.level === KycLevel.ADVANCED;
         kycRecord = manager.getRepository(CustomerKyc).create({
           customer_id: customerId,
           kyc_level: cfg.level,
-          status: KycStatus.APPROVED, // TODO: future review flow (PENDING)
+          status: KycStatus.PENDING,
+          // status: requiresManualApproval
+          //   ? KycStatus.PENDING
+          //   : KycStatus.APPROVED,
           ...payload?.kyc,
           submitted_at: new Date(),
-          reviewed_at: new Date(),
+          // reviewed_at: requiresManualApproval ? null : new Date(),
         });
         kycRecord = await manager.getRepository(CustomerKyc).save(kycRecord);
       }
@@ -297,16 +302,85 @@ export class CustomersService {
       }
 
       // (d) Service activation
+      const requiresManualApproval = kycRecord.status === KycStatus.PENDING;
       const service = manager.getRepository(CustomerService).create({
         customer_id: customerId,
         service_type: serviceType,
-        active: true,
+        active: requiresManualApproval ? false : true,
       });
       const savedService = await manager
         .getRepository(CustomerService)
         .save(service);
-
-      return { service: savedService, kyc: kycRecord, status: 'activated' };
+      return {
+        service: savedService,
+        kyc: kycRecord,
+        status: requiresManualApproval ? 'pending_review' : 'activated',
+      };
     });
+  }
+
+  async approveService(serviceId: string, reviewerUserId: string) {
+    return this.dataSource.transaction(async (manager) => {
+      const svcRepo = manager.getRepository(CustomerService);
+      const kycRepo = manager.getRepository(CustomerKyc);
+
+      const service = await svcRepo.findOne({ where: { id: serviceId } });
+      if (!service) {
+        throw new NotFoundException('Service application not found');
+      }
+      if (service.active) {
+        return { service, status: 'already_active' };
+      }
+
+      // Find the most recent pending KYC for this customer (matching required level logic could be enhanced)
+      const kycs = await kycRepo.find({
+        where: { customer_id: service.customer_id, status: KycStatus.PENDING },
+        order: { created_at: 'DESC' },
+      });
+      const pendingKyc = kycs[0];
+      if (!pendingKyc) {
+        throw new BadRequestException(
+          'No pending KYC to approve for this service',
+        );
+      }
+
+      pendingKyc.status = KycStatus.APPROVED;
+      pendingKyc.reviewed_at = new Date();
+      pendingKyc.reviewed_by = reviewerUserId;
+      await kycRepo.save(pendingKyc);
+
+      service.active = true;
+      const savedService = await svcRepo.save(service);
+      return { service: savedService, kyc: pendingKyc, status: 'activated' };
+    });
+  }
+
+  async listKyc(options: {
+    page?: number;
+    limit?: number;
+    status?: KycStatus;
+    level?: KycLevel;
+    customer_id?: string;
+  }) {
+    const page = options.page && options.page > 0 ? options.page : 1;
+    const limit =
+      options.limit && options.limit > 0 ? Math.min(options.limit, 100) : 20;
+    const where: Record<string, unknown> = {};
+    if (options.status) where.status = options.status;
+    if (options.level) where.kyc_level = options.level;
+    if (options.customer_id) where.customer_id = options.customer_id;
+    const [data, total] = await this.customerKycRepo.findAndCount({
+      where,
+      take: limit,
+      skip: (page - 1) * limit,
+      order: { created_at: 'DESC' },
+    });
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 1,
+    };
   }
 }

@@ -9,7 +9,6 @@ interface AuthenticatedRequest extends Request {
 export const AuthUser = createParamDecorator(
   (data: unknown, ctx: ExecutionContext): JwtPayload => {
     const request = ctx.switchToHttp().getRequest<AuthenticatedRequest>();
-    console.log({ request: request.user });
     return request.user;
   },
 );
