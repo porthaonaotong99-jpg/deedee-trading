@@ -33,6 +33,7 @@ import {
   StockSellResponseExample,
 } from '../../docs/swagger';
 import { StocksService } from './stocks.service';
+import { RealTimePriceService } from './services/real-time-price.service';
 import {
   CreateStockDto,
   UpdateStockDto,
@@ -57,7 +58,10 @@ import type { JwtPayload, PaginationOptions } from '../../common/interfaces';
 @Controller('stocks')
 @UseGuards(JwtAuthGuard)
 export class StocksController {
-  constructor(private readonly stocksService: StocksService) {}
+  constructor(
+    private readonly stocksService: StocksService,
+    private readonly realTimePriceService: RealTimePriceService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List stocks with pagination' })
@@ -124,6 +128,49 @@ export class StocksController {
   ): Promise<IOneResponse<StockResponseDto>> {
     const data = await this.stocksService.findOne(id);
     return handleSuccessOne({ data, message: 'Stock found' });
+  }
+
+  @Get('by-symbol/:symbol')
+  @ApiOperation({
+    summary:
+      'Lookup or auto-create a stock by symbol (also ensures category & optional price refresh)',
+  })
+  @ApiQuery({
+    name: 'refresh',
+    required: false,
+    example: '1',
+    description: 'If provided and truthy, fetch external quote immediately',
+  })
+  @ApiResponse({ status: 200, description: 'Stock ensured/returned' })
+  async findOrCreateBySymbol(
+    @Param('symbol') symbol: string,
+    @Query('refresh') refresh?: string,
+  ): Promise<IOneResponse<Record<string, unknown>>> {
+    const upper = symbol.toUpperCase();
+    // We trigger a subscription to leverage existing ensure logic.
+    await this.realTimePriceService.subscribe(upper);
+
+    if (refresh && refresh !== '0' && refresh !== 'false') {
+      await this.realTimePriceService.fetchAndUpdate(upper, true);
+    }
+
+    const stock = await this.stocksService['stockRepository'].findOne({
+      where: { symbol: upper },
+    });
+
+    return handleSuccessOne({
+      data: {
+        symbol: upper,
+        stock: stock
+          ? {
+              id: stock.id,
+              last_price: stock.last_price,
+              category_id: stock.stock_categories_id,
+            }
+          : null,
+      },
+      message: 'Symbol ensured',
+    });
   }
 
   @Post()
@@ -204,6 +251,73 @@ export class StocksController {
   ): Promise<IOneResponse<null>> {
     await this.stocksService.remove(id);
     return handleSuccessOne({ data: null, message: 'Stock deleted' });
+  }
+
+  @Get('debug/quote/:symbol')
+  @ApiOperation({
+    summary: 'Debug current cached quote (price source/provider)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns cached real-time quote with source',
+    schema: {
+      example: {
+        statusCode: 200,
+        message: 'Quote debug',
+        data: {
+          symbol: 'LAC',
+          price: 6.33,
+          change: -1.04,
+          changePercent: -14.11,
+          volume: 80688120,
+          bidPrice: 6.28,
+          askPrice: 6.29,
+          source: 'EXTERNAL',
+          provider: 'yahoo',
+          high: 6.55,
+          low: 6.2,
+          open: 6.5,
+          previousClose: 7.37,
+          lastUpdate: '2025-09-27T19:28:49.123Z',
+        },
+      },
+    },
+  })
+  debugQuote(
+    @Param('symbol') symbol: string,
+  ):
+    | IOneResponse<Record<string, unknown>>
+    | Promise<IOneResponse<Record<string, unknown>>> {
+    // Ensure placeholder & category exist for debug lookups, without forcing subscription
+    this.realTimePriceService.ensureSymbol(symbol).catch(() => undefined);
+    const current = this.realTimePriceService.getCurrentPrice(symbol);
+    if (!current) {
+      return handleSuccessOne({
+        data: { symbol: symbol.toUpperCase(), message: 'No cached quote' },
+        message: 'Quote debug',
+      });
+    }
+    return handleSuccessOne({
+      data: {
+        symbol: current.symbol,
+        price: current.price,
+        change: current.change,
+        changePercent: current.changePercent,
+        volume: current.volume,
+        bidPrice: current.bidPrice,
+        askPrice: current.askPrice,
+        bidSize: current.bidSize,
+        askSize: current.askSize,
+        source: current.source,
+        provider: current.provider,
+        high: current.high,
+        low: current.low,
+        open: current.open,
+        previousClose: current.previousClose,
+        lastUpdate: new Date().toISOString(),
+      },
+      message: 'Quote debug',
+    });
   }
 
   @Post('buy')

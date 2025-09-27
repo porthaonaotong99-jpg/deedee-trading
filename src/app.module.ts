@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { getDatabaseConfig } from './config/database.config';
@@ -19,6 +20,7 @@ import { StockTransactionsModule } from './modules/stock-transactions/stock-tran
 import { TransferHistoryModule } from './modules/transfer-history/transfer-history.module';
 import { UsersModule } from './modules/users/users.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
+import { DemoModule } from './demo/demo.module';
 
 @Module({
   imports: [
@@ -26,6 +28,7 @@ import { WalletsModule } from './modules/wallets/wallets.module';
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
     }),
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: getDatabaseConfig,
@@ -46,6 +49,7 @@ import { WalletsModule } from './modules/wallets/wallets.module';
     TransferHistoryModule,
     UsersModule,
     WalletsModule,
+    DemoModule,
   ],
   controllers: [AppController],
   providers: [AppService],
