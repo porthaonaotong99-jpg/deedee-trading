@@ -357,6 +357,85 @@ $ mau deploy
 
 With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
 
+## 🐳 Docker & Compose Deployment
+
+### Quick Start (Local)
+
+1. Copy environment file (ensure DB creds match compose values):
+   ```bash
+   cp .env.example .env
+   # Edit .env as needed (DATABASE_HOST=postgres when using compose)
+   ```
+2. Start full stack (Postgres, Redis, Backend):
+   ```bash
+   docker compose up --build -d
+   ```
+3. View logs:
+   ```bash
+   docker compose logs -f backend
+   ```
+4. API available at: `http://localhost:3000`
+5. Swagger (if enabled): `http://localhost:3000/api/v1/docs`
+
+### Stopping & Cleanup
+```bash
+docker compose down           # stop containers
+docker compose down -v        # stop and remove volumes (DESTROYS DATA)
+```
+
+### Rebuild After Code Changes
+```bash
+docker compose build backend && docker compose up -d
+```
+
+### Production Image Build Only
+```bash
+docker build -t deedee-trading-backend:prod .
+```
+
+### Environment Variables (Key)
+Ensure these are set either in `.env` or an override file:
+- DATABASE_HOST=postgres
+- DATABASE_PORT=5432
+- DATABASE_USER=postgres
+- DATABASE_PASSWORD=password
+- DATABASE_NAME=trading_db
+- REDIS_HOST=redis
+- REDIS_PORT=6379
+- NODE_ENV=production
+
+Optional:
+- FINNHUB_KEY=your_key
+- ENABLE_CATEGORY_AUTO_CLASSIFY=true
+- SYSTEM_USER_ID=<uuid>
+
+### Healthcheck
+The container exposes port 3000 and a Docker healthcheck runs the Node process. You can add an internal `/health` endpoint later for richer checks (DB, Redis, providers) and update the Dockerfile to call `curl -f http://localhost:3000/health`.
+
+### Common Issues
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| Migrations not running | No automatic migration step | Add a CMD wrapper script to run `npm run typeorm migration:run` before start |
+| Container unhealthy | App crash or missing env | Check `docker compose logs backend` |
+| Cannot connect to DB | Wrong DATABASE_HOST | Use `postgres` (service name) inside compose |
+
+### Adding Auto Migrations (Optional)
+Create `docker-entrypoint.sh`:
+```bash
+#!/bin/sh
+set -e
+node dist/main.js
+```
+Then in Dockerfile (runtime stage) add:
+```dockerfile
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
+ENTRYPOINT ["./docker-entrypoint.sh"]
+```
+
+Adjust as needed to run migrations before starting.
+
+
 ## Resources
 
 Check out a few resources that may come in handy when working with NestJS:
