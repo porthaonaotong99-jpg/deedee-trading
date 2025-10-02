@@ -13,7 +13,7 @@ import { BoundsModule } from './modules/bounds/bounds.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { CustomerStocksModule } from './modules/customer-stocks/customer-stocks.module';
 import { CustomersModule } from './modules/customers/customers.module';
-import { InteractiveBrokersModule } from './modules/interactive-brokers/interactive-brokers.module';
+// import { InteractiveBrokersModule } from './modules/interactive-brokers/interactive-brokers.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { StockTransactionsModule } from './modules/stock-transactions/stock-transactions.module';
@@ -42,7 +42,7 @@ import { DemoModule } from './demo/demo.module';
     AuditLogsModule,
     CustomerStocksModule,
     CustomersModule,
-    InteractiveBrokersModule,
+    // InteractiveBrokersModule,
     PermissionsModule,
     RolesModule,
     StockTransactionsModule,

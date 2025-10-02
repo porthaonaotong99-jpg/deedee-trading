@@ -21,7 +21,8 @@ export type MarketDataProvider =
   | 'polygon'
   | 'iex'
   | 'yahoo'
-  | 'finnhub';
+  | 'finnhub'
+  | 'fmp';
 
 interface ProviderConfig {
   apiKey?: string;
@@ -34,6 +35,7 @@ interface PriceFetcherOptions {
   iex: ProviderConfig;
   yahoo: ProviderConfig; // does not need api key for basic quote via rapid fallback or unofficial
   finnhub: ProviderConfig;
+  fmp: ProviderConfig;
   primary: MarketDataProvider;
   fallbackOrder: MarketDataProvider[];
 }
@@ -133,6 +135,35 @@ function isYahooResponse(v: unknown): v is YahooQuoteResponseShape {
   return !result || Array.isArray(result);
 }
 
+// Financial Modeling Prep (FMP) response
+interface FMPQuoteResponseShape {
+  symbol?: string;
+  price?: number;
+  changesPercentage?: number;
+  change?: number;
+  dayLow?: number;
+  dayHigh?: number;
+  yearHigh?: number;
+  yearLow?: number;
+  marketCap?: number;
+  priceAvg50?: number;
+  priceAvg200?: number;
+  volume?: number;
+  avgVolume?: number;
+  exchange?: string;
+  open?: number;
+  previousClose?: number;
+  eps?: number;
+  pe?: number;
+  earningsAnnouncement?: string;
+  sharesOutstanding?: number;
+  timestamp?: number;
+  [k: string]: unknown;
+}
+function isFMPQuote(v: unknown): v is FMPQuoteResponseShape {
+  return !!v && typeof v === 'object' && 'price' in v && 'symbol' in v;
+}
+
 // Utility
 function toNumber(value: unknown): number | undefined {
   if (typeof value === 'number')
@@ -182,29 +213,77 @@ export class ExternalPriceFetcherService {
         apiKey: process.env.FINNHUB_KEY,
         enabled: !!process.env.FINNHUB_KEY,
       },
+      fmp: {
+        apiKey: process.env.FMP_API_KEY,
+        enabled: !!process.env.FMP_API_KEY,
+      },
       yahoo: { enabled: true },
       primary:
         (process.env.MARKET_DATA_PRIMARY as MarketDataProvider) || 'yahoo',
-      fallbackOrder: ['finnhub', 'alphaVantage', 'polygon', 'iex', 'yahoo'],
+      fallbackOrder: [
+        'fmp',
+        'finnhub',
+        'alphaVantage',
+        'polygon',
+        'iex',
+        'yahoo',
+      ],
     };
 
     this.primary = opts.primary;
     this.fallback = opts.fallbackOrder.filter((p) => p !== this.primary);
+
+    // Log the configuration for debugging
+    this.logger.log(`Market Data Configuration:`);
+    this.logger.log(`  Primary Provider: ${this.primary}`);
+    this.logger.log(`  Fallback Order: [${this.fallback.join(', ')}]`);
+    this.logger.log(
+      `  AlphaVantage: ${opts.alphaVantage.enabled ? 'ENABLED' : 'DISABLED'} (key: ${opts.alphaVantage.apiKey ? 'SET' : 'NOT SET'})`,
+    );
+    this.logger.log(
+      `  Polygon: ${opts.polygon.enabled ? 'ENABLED' : 'DISABLED'} (key: ${opts.polygon.apiKey ? 'SET' : 'NOT SET'})`,
+    );
+    this.logger.log(
+      `  Finnhub: ${opts.finnhub.enabled ? 'ENABLED' : 'DISABLED'} (key: ${opts.finnhub.apiKey ? 'SET' : 'NOT SET'})`,
+    );
+    this.logger.log(
+      `  FMP: ${opts.fmp.enabled ? 'ENABLED' : 'DISABLED'} (key: ${opts.fmp.apiKey ? 'SET' : 'NOT SET'})`,
+    );
+    this.logger.log(
+      `  IEX: ${opts.iex.enabled ? 'ENABLED' : 'DISABLED'} (key: ${opts.iex.apiKey ? 'SET' : 'NOT SET'})`,
+    );
+    this.logger.log(
+      `  Yahoo: ${opts.yahoo.enabled ? 'ENABLED' : 'DISABLED'} (no key required)`,
+    );
   }
 
   async fetchQuote(symbol: string): Promise<ExternalQuote | null> {
     const pipeline: MarketDataProvider[] = [this.primary, ...this.fallback];
+    this.logger.debug(
+      `[${symbol}] Trying providers in order: [${pipeline.join(', ')}]`,
+    );
+
     for (const provider of pipeline) {
       try {
+        this.logger.debug(`[${symbol}] Trying provider: ${provider}`);
         const quote = await this.fetchFromProvider(provider, symbol);
-        if (quote) return quote;
+        if (quote) {
+          this.logger.debug(
+            `[${symbol}] SUCCESS from ${provider}: $${quote.price}`,
+          );
+          return quote;
+        } else {
+          this.logger.debug(`[${symbol}] No data from provider: ${provider}`);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        this.logger.warn(
-          `Provider ${provider} failed for ${symbol}: ${message}`,
-        );
+        this.logger.warn(`[${symbol}] Provider ${provider} failed: ${message}`);
       }
     }
+
+    this.logger.error(
+      `[${symbol}] ALL providers failed. Pipeline was: [${pipeline.join(', ')}]`,
+    );
     return null;
   }
 
@@ -221,6 +300,15 @@ export class ExternalPriceFetcherService {
       if (yahoo && yahoo.price != null) return true;
     } catch {
       /* ignore */
+    }
+    // Try FMP if key present - generally fast and reliable
+    if (process.env.FMP_API_KEY) {
+      try {
+        const fmp = await this.fetchFMP(upper);
+        if (fmp && fmp.price != null) return true;
+      } catch {
+        /* ignore */
+      }
     }
     // Optionally probe Finnhub if key present
     if (process.env.FINNHUB_KEY) {
@@ -247,6 +335,8 @@ export class ExternalPriceFetcherService {
         return this.fetchIEX(symbol);
       case 'finnhub':
         return this.fetchFinnhub(symbol);
+      case 'fmp':
+        return this.fetchFMP(symbol);
       case 'yahoo':
       default:
         return this.fetchYahoo(symbol);
@@ -502,6 +592,7 @@ export class ExternalPriceFetcherService {
     } catch {
       return null;
     }
+    console.log({ res });
     if (!res.ok) return null;
     let json: unknown;
     try {
@@ -604,6 +695,49 @@ export class ExternalPriceFetcherService {
       timestamp: new Date(
         typeof r.regularMarketTime === 'number'
           ? r.regularMarketTime * 1000
+          : Date.now(),
+      ),
+    };
+  }
+
+  // Financial Modeling Prep (FMP) real-time quote endpoint
+  private async fetchFMP(symbol: string): Promise<ExternalQuote | null> {
+    if (!process.env.FMP_API_KEY) return null;
+    const url = `https://financialmodelingprep.com/api/v3/quote/${encodeURIComponent(
+      symbol,
+    )}?apikey=${process.env.FMP_API_KEY}`;
+    let res: Response;
+    try {
+      res = await fetch(url);
+    } catch {
+      return null;
+    }
+    if (!res.ok) return null;
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      return null;
+    }
+    // FMP returns an array for the quote endpoint
+    if (!Array.isArray(json) || !json.length) return null;
+    const quote = json[0] as unknown;
+    if (!isFMPQuote(quote) || typeof quote.price !== 'number') return null;
+
+    return {
+      symbol: quote.symbol || symbol.toUpperCase(),
+      price: quote.price,
+      open: toNumber(quote.open),
+      high: toNumber(quote.dayHigh),
+      low: toNumber(quote.dayLow),
+      previousClose: toNumber(quote.previousClose),
+      volume: toNumber(quote.volume),
+      // FMP doesn't provide bid/ask in the basic quote endpoint
+      // You could use the /quote-short endpoint for bid/ask if needed
+      provider: 'fmp',
+      timestamp: new Date(
+        typeof quote.timestamp === 'number'
+          ? quote.timestamp * 1000
           : Date.now(),
       ),
     };

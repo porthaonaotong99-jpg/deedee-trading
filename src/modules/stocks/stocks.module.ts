@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { StocksService } from './stocks.service';
 import { StocksController } from './stocks.controller';
 import { StockQuotesController } from './quotes.controller';
+import { TechnicalIndicatorsController } from './controllers/technical-indicators.controller';
 import { Stock } from './entities/stock.entity';
 import { StockPriceHistory } from './entities/stock-price-history.entity';
 import { StockCategory } from '../stock-categories/entities/stock-category.entity';
@@ -19,6 +20,7 @@ import { RealTimePriceService } from './services/real-time-price.service';
 import { StockPricesGateway } from './gateways/stock-prices.gateway';
 import { ExternalPriceFetcherService } from './services/external-price-fetcher.service';
 import { StockMetadataService } from './services/stock-metadata.service';
+import { TechnicalIndicatorsService } from './services/technical-indicators.service';
 
 @Module({
   imports: [
@@ -36,12 +38,17 @@ import { StockMetadataService } from './services/stock-metadata.service';
       StockCategory,
     ]),
   ],
-  controllers: [StocksController, StockQuotesController],
+  controllers: [
+    StocksController,
+    StockQuotesController,
+    TechnicalIndicatorsController,
+  ],
   providers: [
     StocksService,
     UsersService,
     ExternalPriceFetcherService,
     StockMetadataService,
+    TechnicalIndicatorsService,
     // Use forwardRef wrappers only if needed for circular resolution
     RealTimePriceService,
     StockPricesGateway,

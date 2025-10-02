@@ -63,8 +63,8 @@ export class RealTimePriceService {
     if (this.subscriptions.has(upper)) return;
     this.subscriptions.add(upper);
     this.logger.log(`Subscribed to real-time data for ${upper}`);
-    // Attempt immediate real quote fetch
-    await this.fetchAndUpdate(upper, true);
+    // Attempt immediate real quote fetch - NO SIMULATION FALLBACK
+    await this.fetchAndUpdate(upper, false);
   }
 
   /**
@@ -300,18 +300,38 @@ export class RealTimePriceService {
     allowSimFallback = false,
   ): Promise<void> {
     await this.ensureStockExists(symbol.toUpperCase());
+
+    this.logger.log(`[WebSocket] Starting fetchAndUpdate for ${symbol}`);
+    this.logger.debug(`[WebSocket] allowSimFallback=${allowSimFallback}`);
+
     const quote = await this.externalPriceFetcher.fetchQuote(symbol);
+
     if (!quote) {
+      this.logger.error(
+        `[WebSocket] No external quote returned for ${symbol} - ALL providers failed!`,
+      );
       const simEnabled =
         (process.env.ENABLE_PRICE_SIMULATION || 'true') === 'true';
+      this.logger.debug(
+        `[WebSocket] Simulation enabled: ${simEnabled}, allowSimFallback: ${allowSimFallback}`,
+      );
+
       if (allowSimFallback && simEnabled) {
         this.logger.warn(
-          `No external quote for ${symbol}, using simulated data fallback`,
+          `[WebSocket] Using simulated data fallback for ${symbol}`,
         );
         await this.simulateMarketData(symbol);
+      } else {
+        this.logger.error(
+          `[WebSocket] No real data available for ${symbol} and simulation disabled - NO UPDATE SENT`,
+        );
       }
       return;
     }
+
+    this.logger.log(
+      `[WebSocket] SUCCESS: Got real quote for ${symbol}: $${quote.price} from ${quote.provider}`,
+    );
 
     const previous = this.getCurrentPrice(symbol);
     const basePreviousClose =
@@ -349,10 +369,11 @@ export class RealTimePriceService {
   async refreshSubscribedQuotes(): Promise<void> {
     if (!this.subscriptions.size) return;
     this.logger.debug(
-      `Refreshing quotes for ${this.subscriptions.size} subscribed symbols`,
+      `[WebSocket] Refreshing quotes for ${this.subscriptions.size} subscribed symbols`,
     );
     for (const symbol of this.subscriptions) {
-      await this.fetchAndUpdate(symbol, true);
+      // NO SIMULATION FALLBACK - only real data
+      await this.fetchAndUpdate(symbol, false);
     }
   }
 
