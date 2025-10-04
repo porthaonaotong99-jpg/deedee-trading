@@ -4,7 +4,6 @@ import {
   IsOptional,
   IsUUID,
   IsString,
-  IsBoolean,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -72,14 +71,23 @@ export class ApplyPremiumMembershipDto {
   })
   @IsEnum(CustomerServiceType)
   service_type: CustomerServiceType.PREMIUM_MEMBERSHIP;
-
   @ApiProperty({
-    description: 'Subscription package details',
+    description: 'Selected subscription package ID',
+    example: 'uuid-package-id',
+  })
+  @IsString()
+  package_id!: string;
+
+  // Deprecated: keep for backward compatibility if older clients still send inline subscription
+  @ApiPropertyOptional({
+    description:
+      '[Deprecated] Inline subscription object; prefer package_id instead',
     type: SubscriptionPackageDto,
   })
   @ValidateNested()
+  @IsOptional()
   @Type(() => SubscriptionPackageDto)
-  subscription: SubscriptionPackageDto;
+  subscription?: SubscriptionPackageDto;
 
   @ApiProperty({
     description: 'Payment slip information (required for application)',
@@ -230,16 +238,26 @@ export class PremiumMembershipResponseDto {
 }
 
 export class ApprovePaymentSlipDto {
-  @ApiProperty({
-    description: 'Whether to approve the payment slip',
-    example: true,
+  @ApiPropertyOptional({
+    description: 'Admin notes for the approval',
+    example: 'Payment verified and matches package fee',
   })
-  @IsBoolean()
-  approve: boolean;
+  @IsOptional()
+  @IsString()
+  admin_notes?: string;
+}
+
+export class RejectPaymentSlipDto {
+  @ApiProperty({
+    description: 'Rejection reason (required when rejecting)',
+    example: 'Slip is blurry / amount mismatch',
+  })
+  @IsString()
+  rejection_reason: string;
 
   @ApiPropertyOptional({
-    description: 'Admin notes for the approval/rejection',
-    example: 'Payment verified and approved',
+    description: 'Additional admin notes (optional)',
+    example: 'Customer will resubmit with clearer photo',
   })
   @IsOptional()
   @IsString()

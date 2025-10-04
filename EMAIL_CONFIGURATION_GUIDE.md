@@ -24,6 +24,13 @@ SMTP_USER=your-email@gmail.com
 SMTP_PASSWORD=your-app-password
 SMTP_FROM_NAME=DeeDee Trading
 SMTP_FROM_EMAIL=noreply@deedee-trading.com
+# Optional advanced TLS / troubleshooting flags
+# Force ignoring TLS (rare; for dev only)
+# SMTP_IGNORE_TLS=false
+# Require STARTTLS upgrade (if server requires it explicitly)
+# SMTP_REQUIRE_TLS=false
+# Allow self-signed certs in dev ONLY (set to false to disable reject)
+# SMTP_TLS_REJECT_UNAUTHORIZED=true
 ```
 
 ### Gmail Configuration

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 import {
   EmailService,
   EmailOptions,
@@ -18,18 +19,77 @@ export class NodemailerEmailService implements EmailService {
   }
 
   private initializeTransporter(): void {
-    const config = {
-      host: this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com'),
-      port: this.configService.get<number>('SMTP_PORT', 587),
-      secure: this.configService.get<boolean>('SMTP_SECURE', false), // true for 465, false for other ports
-      auth: {
-        user: this.configService.get<string>('SMTP_USER'),
-        pass: this.configService.get<string>('SMTP_PASSWORD'),
+    const host = this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com');
+    const port = Number(this.configService.get<number>('SMTP_PORT', 587));
+    // Robust boolean parsing for secure (tolerate 'true', 'false', '1', '0')
+    const secureRaw = this.configService.get<string>('SMTP_SECURE');
+    let secure = false;
+    if (typeof secureRaw === 'string') {
+      const lowered = secureRaw.trim().toLowerCase();
+      secure = ['true', '1', 'yes', 'y'].includes(lowered);
+    } else if (typeof secureRaw === 'boolean') {
+      secure = secureRaw;
+    }
+    const user = this.configService.get<string>('SMTP_USER');
+    let pass = this.configService.get<string>('SMTP_PASSWORD');
+    if (pass) {
+      // Strip surrounding quotes and internal spaces sometimes copied from UI for app passwords
+      pass = pass.replace(/^['"`](.*)['"`]$/u, '$1').replace(/\s+/g, '');
+    }
+    const ignoreTls =
+      this.configService.get<string>('SMTP_IGNORE_TLS') === 'true';
+    const requireTls =
+      this.configService.get<string>('SMTP_REQUIRE_TLS') === 'true';
+
+    // Auto-adjust secure based on common port conventions if user set a mismatched combination
+    if (port === 465 && secure === false) {
+      this.logger.warn(
+        'Port 465 detected but SMTP_SECURE=false. Overriding to secure=true (implicit SSL).',
+      );
+      secure = true;
+    } else if (port === 587 && secure === true) {
+      this.logger.warn(
+        'Port 587 detected with SMTP_SECURE=true. Overriding to secure=false (STARTTLS upgrade).',
+      );
+      secure = false;
+    }
+
+    const config: SMTPTransport.Options = {
+      host,
+      port,
+      secure,
+      auth: user && pass ? { user, pass } : undefined,
+      tls: {
+        rejectUnauthorized:
+          this.configService.get<string>(
+            'SMTP_TLS_REJECT_UNAUTHORIZED',
+            'true',
+          ) !== 'false',
       },
     };
+    console.log({ config });
+
+    if (ignoreTls || requireTls) {
+      const extendedConfig = config as SMTPTransport.Options & {
+        ignoreTLS?: boolean;
+        requireTLS?: boolean;
+      };
+      if (ignoreTls) extendedConfig.ignoreTLS = true;
+      if (requireTls) extendedConfig.requireTLS = true;
+    }
+
+    const debug = this.configService.get<string>('SMTP_DEBUG') === 'true';
+    this.logger.log(
+      `Initializing SMTP transporter: host=${host} port=${port} secure=${secure} auth=${user ? 'yes' : 'no'} ignoreTLS=${ignoreTls} requireTLS=${requireTls} debug=${debug}`,
+    );
+    if (debug) {
+      this.logger.debug(
+        `Raw env => SMTP_SECURE='${secureRaw}' (parsed: ${secure}); PASSWORD_LENGTH=${pass ? pass.length : 0}`,
+      );
+    }
 
     // Validate required configuration
-    if (!config.auth.user || !config.auth.pass) {
+    if (!user || !pass) {
       this.logger.warn(
         'SMTP credentials not configured. Email functionality will be disabled.',
       );
@@ -37,12 +97,38 @@ export class NodemailerEmailService implements EmailService {
       return;
     }
 
-    this.transporter = nodemailer.createTransport(config);
+    try {
+      this.transporter = nodemailer.createTransport({ ...config, debug });
+    } catch (ctorErr) {
+      this.logger.error('Failed to construct SMTP transporter', ctorErr);
+      this.transporter = null;
+      return;
+    }
 
     // Verify the connection configuration
     this.transporter.verify((error) => {
       if (error) {
+        const hintParts: string[] = [];
+        if (/self signed/i.test(String(error))) {
+          hintParts.push(
+            'Self-signed certificate detected. Consider setting SMTP_TLS_REJECT_UNAUTHORIZED=false ONLY for development.',
+          );
+        }
+        if (/wrong version number/i.test(String(error))) {
+          hintParts.push(
+            'TLS version mismatch. Make sure port & secure match: 465 -> secure=true, 587 -> secure=false (STARTTLS).',
+          );
+        }
+        if (/certificate/i.test(String(error)) && port === 587 && secure) {
+          hintParts.push(
+            'Detected secure=true with port 587; change to SMTP_SECURE=false.',
+          );
+        }
         this.logger.error('SMTP connection failed:', error);
+        if (hintParts.length) {
+          this.logger.warn('Troubleshooting hints:');
+          hintParts.forEach((h) => this.logger.warn(' - ' + h));
+        }
       } else {
         this.logger.log('SMTP server is ready to take our messages');
       }
@@ -67,7 +153,7 @@ export class NodemailerEmailService implements EmailService {
         from: {
           name: this.configService.get<string>(
             'SMTP_FROM_NAME',
-            'DeeDee Trading',
+            'PhaJao invest',
           ),
           address: fromEmail,
         },
@@ -76,6 +162,7 @@ export class NodemailerEmailService implements EmailService {
         html: options.html,
         text: options.text,
       };
+      console.log({ mailOptions });
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const info: { messageId?: string } =
@@ -87,12 +174,18 @@ export class NodemailerEmailService implements EmailService {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`Failed to send email to ${options.to}:`, error);
+      // Provide more context for TLS mismatch errors
+      if (/wrong version number/i.test(errorMessage)) {
+        throw new Error(
+          `Failed to send email: TLS negotiation failed (wrong version number). Check SMTP_PORT & SMTP_SECURE combination. ${errorMessage}`,
+        );
+      }
       throw new Error(`Failed to send email: ${errorMessage}`);
     }
   }
 
   async sendOtpEmail(data: OtpEmailData): Promise<void> {
-    const subject = 'Password Reset OTP - DeeDee Trading';
+    const subject = 'Password Reset OTP - PhaJao invest';
     const html = this.generateOtpEmailHtml(data);
     const text = this.generateOtpEmailText(data);
 
@@ -105,7 +198,7 @@ export class NodemailerEmailService implements EmailService {
   }
 
   async sendResetLinkEmail(data: ResetLinkEmailData): Promise<void> {
-    const subject = 'Password Reset Link - DeeDee Trading';
+    const subject = 'Password Reset Link - PhaJao invest';
     const html = this.generateResetLinkEmailHtml(data);
     const text = this.generateResetLinkEmailText(data);
 
@@ -129,7 +222,7 @@ export class NodemailerEmailService implements EmailService {
         </head>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
           <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h1 style="color: #2c5aa0;">DeeDee Trading</h1>
+            <h1 style="color: #2c5aa0;">PhaJao invest</h1>
             <h2>Password Reset OTP</h2>
             
             <p>Hello ${customerName},</p>
@@ -151,7 +244,7 @@ export class NodemailerEmailService implements EmailService {
             
             <hr style="margin: 30px 0;">
             <p style="font-size: 12px; color: #666;">
-              This is an automated message from DeeDee Trading. Please do not reply to this email.
+              This is an automated message from PhaJao invest. Please do not reply to this email.
             </p>
           </div>
         </body>
@@ -162,7 +255,7 @@ export class NodemailerEmailService implements EmailService {
   private generateOtpEmailText(data: OtpEmailData): string {
     const customerName = data.customerName || 'Customer';
     return `
-    DeeDee Trading - Password Reset OTP
+    PhaJao invest - Password Reset OTP
 
     Hello ${customerName},
 
@@ -175,7 +268,7 @@ export class NodemailerEmailService implements EmailService {
 
     Expires at: ${data.expiresAt.toLocaleString()}
 
-    This is an automated message from DeeDee Trading.
+    This is an automated message from PhaJao invest.
     `.trim();
   }
 
@@ -191,7 +284,7 @@ export class NodemailerEmailService implements EmailService {
         </head>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
           <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h1 style="color: #2c5aa0;">DeeDee Trading</h1>
+            <h1 style="color: #2c5aa0;">PhaJao invest</h1>
             <h2>Password Reset Request</h2>
             
             <p>Hello ${customerName},</p>
@@ -221,7 +314,7 @@ export class NodemailerEmailService implements EmailService {
             
             <hr style="margin: 30px 0;">
             <p style="font-size: 12px; color: #666;">
-              This is an automated message from DeeDee Trading. Please do not reply to this email.
+              This is an automated message from PhaJao invest. Please do not reply to this email.
             </p>
           </div>
         </body>
@@ -232,7 +325,7 @@ export class NodemailerEmailService implements EmailService {
   private generateResetLinkEmailText(data: ResetLinkEmailData): string {
     const customerName = data.customerName || 'Customer';
     return `
-    DeeDee Trading - Password Reset Request
+    PhaJao invest - Password Reset Request
 
     Hello ${customerName},
 
@@ -247,7 +340,7 @@ export class NodemailerEmailService implements EmailService {
 
     Expires at: ${data.expiresAt.toLocaleString()}
 
-    This is an automated message from DeeDee Trading.
+    This is an automated message from PhaJao invest.
     `.trim();
   }
 }

@@ -51,7 +51,7 @@ export class AdminStockPicksController {
   })
   @ApiBody({ type: CreateStockPickDto })
   @ApiResponse({
-    status: 201,
+    status: 200,
     description: 'Stock pick created successfully',
     type: StockPickResponseDto,
   })

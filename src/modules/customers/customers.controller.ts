@@ -163,7 +163,6 @@ export class CustomersController {
       userAgent: req.headers['user-agent'] as string,
       ipAddress: req.ip,
     };
-    console.log({ context });
 
     const result = await this.service.forgotPassword(dto, context);
     return handleSuccessOne({

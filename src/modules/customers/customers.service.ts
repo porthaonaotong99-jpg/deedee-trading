@@ -6,7 +6,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, MoreThan, LessThan } from 'typeorm';
+import { Repository, DataSource, MoreThan, LessThan, In } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
@@ -62,6 +62,7 @@ import {
   PaymentAuditAction,
   PaymentAuditLevel,
 } from './entities/payment-audit-log.entity';
+import { SubscriptionPackage } from './entities/subscription-package.entity';
 
 export interface PendingPremiumMembership {
   service_id: string;
@@ -81,6 +82,7 @@ export interface PendingPremiumMembership {
     amount: number;
     paid_at: Date;
     status: PaymentStatus;
+    payment_slip_url?: string;
   };
 }
 
@@ -112,6 +114,8 @@ export class CustomersService {
     private readonly passwordResetRepo: Repository<PasswordReset>,
     @InjectRepository(Payment)
     private readonly paymentRepo: Repository<Payment>,
+    @InjectRepository(SubscriptionPackage)
+    private readonly subscriptionPackageRepo: Repository<SubscriptionPackage>,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
@@ -899,6 +903,7 @@ export class CustomersService {
         status: PasswordResetStatus.PENDING,
         expires_at: MoreThan(new Date()),
       },
+      order: { created_at: 'DESC' },
       relations: ['customer'],
     });
 
@@ -1328,10 +1333,7 @@ export class CustomersService {
 
   async applyPremiumMembershipWithPaymentSlip(
     customerId: string,
-    subscriptionParams: {
-      duration: SubscriptionDuration;
-      fee?: number;
-    },
+    packageId: string,
     paymentSlipData: {
       payment_slip_url: string;
       payment_slip_filename: string;
@@ -1354,13 +1356,30 @@ export class CustomersService {
       );
     }
 
-    // Calculate subscription fee
-    const fee =
-      subscriptionParams.fee ||
-      this.calculateSubscriptionFee(
-        CustomerServiceType.PREMIUM_MEMBERSHIP,
-        subscriptionParams.duration,
+    // Load subscription package
+    const pkg = await this.subscriptionPackageRepo.findOne({
+      where: {
+        id: packageId,
+        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+        active: true,
+      },
+    });
+
+    if (!pkg) {
+      throw new BadRequestException(
+        'Subscription package not found or inactive',
       );
+    }
+
+    // Map package duration to enum (assert value is valid)
+    const duration = pkg.duration_months as SubscriptionDuration;
+    if (!Object.values(SubscriptionDuration).includes(duration)) {
+      throw new BadRequestException(
+        'Unsupported subscription package duration',
+      );
+    }
+
+    const fee = Number(pkg.price);
 
     // Validate payment amount matches subscription fee
     if (Math.abs(paymentSlipData.payment_amount - fee) > 0.01) {
@@ -1379,7 +1398,7 @@ export class CustomersService {
           CustomerServiceType.PREMIUM_MEMBERSHIP,
           {
             subscription: {
-              duration: subscriptionParams.duration,
+              duration,
               fee,
             },
           },
@@ -1387,6 +1406,7 @@ export class CustomersService {
 
         // Create payment record with slip data submitted immediately
         const manualIntentId = `manual-${Date.now()}-${customerId}`;
+        // Since the slip is provided at application time, mark it as submitted immediately
         const paymentEntity: Partial<Payment> = {
           customer_id: customerId,
           service_id: serviceResult.service.id,
@@ -1394,8 +1414,9 @@ export class CustomersService {
           payment_method: PaymentMethod.MANUAL_TRANSFER,
           amount: fee,
           currency: 'USD',
-          status: PaymentStatus.PENDING,
-          description: `Premium Membership - ${subscriptionParams.duration} months (Manual Payment)`,
+          // Directly mark as slip submitted so it can be approved without extra user step
+          status: PaymentStatus.PAYMENT_SLIP_SUBMITTED,
+          description: `Premium Membership - ${duration} months (Manual Payment)`,
           payment_intent_id: manualIntentId,
           external_payment_id: manualIntentId,
           payment_url: undefined,
@@ -1403,7 +1424,7 @@ export class CustomersService {
           payment_slip_url: paymentSlipData.payment_slip_url,
           payment_slip_filename: paymentSlipData.payment_slip_filename,
           payment_reference: paymentSlipData.payment_reference,
-          payment_slip_submitted_at: null,
+          payment_slip_submitted_at: new Date(),
         };
         const paymentRecord = await paymentRepo.save(paymentEntity);
 
@@ -1480,7 +1501,6 @@ export class CustomersService {
   async approveServicePayment(
     paymentId: string,
     adminUserId: string,
-    approve: boolean,
     adminNotes?: string,
   ) {
     return await this.dataSource.transaction(
@@ -1489,60 +1509,173 @@ export class CustomersService {
         const serviceRepo =
           transactionalEntityManager.getRepository(CustomerService);
 
-        // Find the payment record
+        // Find the payment record in an approvable status (either initial pending or slip submitted)
+        const approvableStatuses = [
+          PaymentStatus.PENDING,
+          PaymentStatus.PAYMENT_SLIP_SUBMITTED,
+        ];
         const payment = await paymentRepo.findOne({
           where: {
             id: paymentId,
-            status: PaymentStatus.PAYMENT_SLIP_SUBMITTED,
+            status: In(approvableStatuses),
           },
           relations: ['service'],
         });
 
         if (!payment) {
           throw new NotFoundException(
-            'Payment record not found or not in submitted status',
+            'Payment record not found or not in an approvable status',
           );
         }
 
         const now = new Date();
 
-        if (approve) {
-          // Approve payment and activate service
-          await paymentRepo.update(payment.id, {
-            status: PaymentStatus.SUCCEEDED,
-            approved_by_admin_id: adminUserId,
-            approved_at: now,
-            admin_notes: adminNotes,
-            paid_at: now,
-          });
+        // Approve payment and activate service
+        await paymentRepo.update(payment.id, {
+          status: PaymentStatus.SUCCEEDED,
+          approved_by_admin_id: adminUserId,
+          approved_at: now,
+          admin_notes: adminNotes,
+          paid_at: now,
+        });
 
-          // Activate the service
-          await serviceRepo.update(payment.service.id, {
-            active: true,
-          });
-
-          return {
-            status: 'approved',
-            message: 'Payment approved and service activated successfully',
-          };
-        } else {
-          // Reject payment
-          await paymentRepo.update(payment.id, {
-            status: PaymentStatus.FAILED,
-            approved_by_admin_id: adminUserId,
-            approved_at: now,
-            admin_notes: adminNotes,
-            failed_at: now,
-            failure_reason: 'Payment slip rejected by admin',
-          });
-
-          return {
-            status: 'rejected',
-            message: 'Payment rejected',
-          };
+        // Ensure subscription expiration & fee are set
+        const service = payment.service;
+        let subscriptionExpiresAt = service.subscription_expires_at;
+        if (!subscriptionExpiresAt && service.subscription_duration) {
+          const baseDate = service.applied_at || now;
+          const exp = new Date(baseDate);
+          exp.setMonth(exp.getMonth() + service.subscription_duration);
+          subscriptionExpiresAt = exp;
         }
+
+        await serviceRepo.update(service.id, {
+          active: true,
+          subscription_expires_at: subscriptionExpiresAt,
+          subscription_fee: service.subscription_fee ?? payment.amount,
+        });
+
+        return {
+          status: 'approved',
+          message: 'Payment approved and service activated successfully',
+          service_id: service.id,
+          subscription_expires_at: subscriptionExpiresAt,
+        };
       },
     );
+  }
+
+  /**
+   * Manual renewal flow using payment slip (no online gateway)
+   * Creates a new pending (inactive) service record and a pending payment with slip metadata.
+   * Admin must approve via approveServicePayment (same endpoint as initial application).
+   */
+  async renewPremiumMembershipWithSlip(
+    customerId: string,
+    packageId: string,
+    paymentSlip: {
+      payment_slip_url: string;
+      payment_slip_filename: string;
+      payment_amount: number;
+      payment_reference?: string;
+    },
+  ) {
+    // Find latest existing premium membership (active or expired)
+    const existing = await this.customerServiceRepo.find({
+      where: {
+        customer_id: customerId,
+        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+      },
+      order: { applied_at: 'DESC' },
+      take: 1,
+    });
+
+    if (!existing.length) {
+      throw new BadRequestException(
+        'No existing premium membership to renew. Apply first.',
+      );
+    }
+
+    const pkg = await this.subscriptionPackageRepo.findOne({
+      where: {
+        id: packageId,
+        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+        active: true,
+      },
+    });
+
+    if (!pkg) {
+      throw new BadRequestException(
+        'Subscription package not found or inactive',
+      );
+    }
+
+    const duration = pkg.duration_months as SubscriptionDuration;
+    if (!Object.values(SubscriptionDuration).includes(duration)) {
+      throw new BadRequestException(
+        'Unsupported subscription package duration',
+      );
+    }
+
+    const fee = Number(pkg.price);
+
+    if (Math.abs(paymentSlip.payment_amount - fee) > 0.01) {
+      throw new BadRequestException(
+        `Payment amount (${paymentSlip.payment_amount}) does not match subscription fee (${fee})`,
+      );
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const serviceRepo = manager.getRepository(CustomerService);
+      const paymentRepo = manager.getRepository(Payment);
+
+      // Create new pending renewal service
+      const renewalService = serviceRepo.create({
+        customer_id: customerId,
+        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+        active: false, // pending approval
+        requires_payment: true,
+        subscription_duration: duration,
+        subscription_fee: fee,
+        subscription_expires_at: null, // set upon approval
+      });
+      const savedService = await serviceRepo.save(renewalService);
+
+      // Create pending payment with slip
+      const manualIntentId = `manual-renew-${Date.now()}-${customerId}`;
+      const paymentEntity: Partial<Payment> = {
+        customer_id: customerId,
+        service_id: savedService.id,
+        payment_type: PaymentType.RENEWAL,
+        payment_method: PaymentMethod.MANUAL_TRANSFER,
+        amount: fee,
+        currency: 'USD',
+        status: PaymentStatus.PENDING,
+        description: `Premium Membership Renewal - ${duration} months (Manual Payment)`,
+        payment_intent_id: manualIntentId,
+        external_payment_id: manualIntentId,
+        payment_url: undefined,
+        payment_url_expires_at: undefined,
+        payment_slip_url: paymentSlip.payment_slip_url,
+        payment_slip_filename: paymentSlip.payment_slip_filename,
+        payment_reference: paymentSlip.payment_reference,
+        payment_slip_submitted_at: new Date(),
+      };
+      const paymentRecord = await paymentRepo.save(paymentEntity);
+
+      return {
+        status: 'renewal_pending_admin_review',
+        renewal_service: savedService,
+        payment: {
+          payment_id: paymentRecord.id,
+          amount: fee,
+          currency: 'USD',
+          payment_slip_filename: paymentRecord.payment_slip_filename,
+          submitted_at: paymentRecord.payment_slip_submitted_at,
+          instructions: 'Renewal payment slip submitted. Pending admin review.',
+        },
+      };
+    });
   }
 
   // --- Premium Membership Renewal ---
@@ -1798,6 +1931,7 @@ export class CustomersService {
       const successfulPayment = payments.find(
         (payment) => payment.status === PaymentStatus.PENDING,
       );
+      console.log({ successfulPayment });
 
       if (successfulPayment) {
         servicesWithPayments.push({
@@ -1818,6 +1952,7 @@ export class CustomersService {
             amount: successfulPayment.amount,
             paid_at: successfulPayment.paid_at || successfulPayment.updated_at,
             status: successfulPayment.status,
+            payment_slip_url: successfulPayment.payment_slip_url || undefined,
           },
         });
       }

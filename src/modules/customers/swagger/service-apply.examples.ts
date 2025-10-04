@@ -3,42 +3,42 @@
 import { CustomerServiceType } from '../entities/customer-service.entity';
 
 export const ServiceApplyRequestExamples = {
-  premiumMembership3Months: {
-    summary: 'Premium Membership - 3 Months',
-    value: {
-      service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
-      subscription: {
-        duration: 3,
-        fee: 299.99,
-      },
-    },
-  },
-  premiumMembership6Months: {
-    summary: 'Premium Membership - 6 Months (Popular)',
-    value: {
-      service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
-      subscription: {
-        duration: 6,
-        fee: 549.99,
-      },
-    },
-  },
-  premiumMembership12Months: {
-    summary: 'Premium Membership - 12 Months (Best Value)',
-    value: {
-      service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
-      subscription: {
-        duration: 12,
-        fee: 999.99,
-      },
-    },
-  },
-  premiumStockPicks: {
-    summary: 'Premium Stock Picks (Free)',
-    value: {
-      service_type: CustomerServiceType.PREMIUM_STOCK_PICKS,
-    },
-  },
+  // premiumMembership3Months: {
+  //   summary: 'Premium Membership - 3 Months',
+  //   value: {
+  //     service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+  //     subscription: {
+  //       duration: 3,
+  //       fee: 299.99,
+  //     },
+  //   },
+  // },
+  // premiumMembership6Months: {
+  //   summary: 'Premium Membership - 6 Months (Popular)',
+  //   value: {
+  //     service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+  //     subscription: {
+  //       duration: 6,
+  //       fee: 549.99,
+  //     },
+  //   },
+  // },
+  // premiumMembership12Months: {
+  //   summary: 'Premium Membership - 12 Months (Best Value)',
+  //   value: {
+  //     service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+  //     subscription: {
+  //       duration: 12,
+  //       fee: 999.99,
+  //     },
+  //   },
+  // },
+  // premiumStockPicks: {
+  //   summary: 'Premium Stock Picks (Free)',
+  //   value: {
+  //     service_type: CustomerServiceType.PREMIUM_STOCK_PICKS,
+  //   },
+  // },
   internationalStockAccount: {
     summary: 'International Stock Account (advanced)',
     value: {
