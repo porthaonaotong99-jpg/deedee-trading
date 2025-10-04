@@ -1,0 +1,79 @@
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  OneToMany,
+} from 'typeorm';
+import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
+import { CustomerStockPick } from './customer-stock-pick.entity';
+
+export enum StockPickStatus {
+  GOOD = 'good',
+  BAD = 'bad',
+  NEUTRAL = 'neutral',
+  PENDING = 'pending',
+}
+
+export enum StockPickAvailability {
+  AVAILABLE = 'available',
+  TAKEN = 'taken',
+  EXPIRED = 'expired',
+}
+
+@Entity('stock_picks')
+export class StockPick {
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
+
+  @Column({ type: 'varchar', length: 20 })
+  stock_symbol: string;
+
+  @Column({ type: 'text' })
+  description: string;
+
+  @Column({
+    type: 'enum',
+    enum: StockPickStatus,
+    default: StockPickStatus.PENDING,
+  })
+  status: StockPickStatus;
+
+  @Column({
+    type: 'enum',
+    enum: StockPickAvailability,
+    default: StockPickAvailability.AVAILABLE,
+  })
+  availability: StockPickAvailability;
+
+  @Column({ type: 'enum', enum: CustomerServiceType })
+  service_type: CustomerServiceType;
+
+  @Column({ type: 'uuid' })
+  created_by_admin_id: string;
+
+  @Column({ type: 'text', nullable: true })
+  admin_notes: string | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  target_price: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  current_price: number | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  expires_at: Date | null;
+
+  @Column({ type: 'boolean', default: true })
+  is_active: boolean;
+
+  @OneToMany(() => CustomerStockPick, (customerPick) => customerPick.stock_pick)
+  customer_picks: CustomerStockPick[];
+
+  @CreateDateColumn()
+  created_at: Date;
+
+  @UpdateDateColumn()
+  updated_at: Date;
+}

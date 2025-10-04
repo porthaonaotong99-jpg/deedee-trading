@@ -13,6 +13,7 @@ import { Customer } from '../customers/entities/customer.entity';
 import { getJwtConfig } from '../../config/jwt.config';
 import { WalletsModule } from '../wallets/wallets.module';
 import { SessionsModule } from '../sessions/sessions.module';
+import { CustomersModule } from '../customers/customers.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { SessionsModule } from '../sessions/sessions.module';
     }),
     WalletsModule,
     SessionsModule,
+    CustomersModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, JwtUserStrategy, JwtCustomerStrategy],

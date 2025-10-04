@@ -1,4 +1,7 @@
-import { CustomerServiceType } from '../entities/customer-service.entity';
+import {
+  CustomerServiceType,
+  SubscriptionDuration,
+} from '../entities/customer-service.entity';
 import { CustomerDocumentType } from '../entities/customer-document.entity';
 import { KycLevel } from '../entities/customer-kyc.entity';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -11,7 +14,9 @@ import {
   IsInt,
   Min,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import {
   EmploymentStatus,
   MaritalStatus,
@@ -126,6 +131,25 @@ export class ApplyServiceKycDto {
   fatca_status?: string;
 }
 
+export class ApplyServiceSubscriptionDto {
+  @ApiProperty({
+    description: 'Subscription duration in months',
+    enum: SubscriptionDuration,
+    example: SubscriptionDuration.SIX_MONTHS,
+  })
+  @IsEnum(SubscriptionDuration)
+  duration: SubscriptionDuration;
+
+  @ApiPropertyOptional({
+    description: 'Subscription fee (will be calculated if not provided)',
+    example: 549.99,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  fee?: number;
+}
+
 export class ApplyServiceDto {
   @ApiProperty({ enum: CustomerServiceType })
   @IsEnum(CustomerServiceType)
@@ -145,6 +169,16 @@ export class ApplyServiceDto {
     type: [ApplyServiceDocumentDto],
   })
   documents?: ApplyServiceDocumentDto[];
+
+  @ApiPropertyOptional({
+    type: ApplyServiceSubscriptionDto,
+    description:
+      'Required for subscription-based services like premium_membership',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ApplyServiceSubscriptionDto)
+  subscription?: ApplyServiceSubscriptionDto;
 }
 
 export class ApplyServiceResponseDto {

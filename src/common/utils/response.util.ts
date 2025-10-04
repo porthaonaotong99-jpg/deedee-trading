@@ -17,6 +17,19 @@ export interface IManyResponse<T = any> {
   status_code: number;
 }
 
+export interface IPaginatedResponse<T = any> {
+  is_error: boolean;
+  code: string;
+  message: string;
+  data: T[] | null;
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  error: Record<string, any> | null;
+  status_code: number;
+}
+
 // Success (single resource)
 export function handleSuccessOne<T>(params: {
   code?: string;
@@ -61,6 +74,41 @@ export function handleSuccessMany<T>(params: {
     message,
     data,
     total,
+    error: null,
+    status_code: statusCode,
+  };
+}
+
+// Success (paginated data)
+export function handleSuccessPaginated<T>(params: {
+  code?: string;
+  message?: string;
+  data?: T[] | null;
+  total?: number;
+  page?: number;
+  limit?: number;
+  totalPages?: number;
+  statusCode?: number;
+}): IPaginatedResponse<T> {
+  const {
+    code = 'SUCCESS',
+    message = 'Success',
+    data = null,
+    total = Array.isArray(data) ? data.length : 0,
+    page = 1,
+    limit = 20,
+    totalPages = Math.ceil(total / limit) || 1,
+    statusCode = 200,
+  } = params;
+  return {
+    is_error: false,
+    code,
+    message,
+    data,
+    total,
+    page,
+    limit,
+    totalPages,
     error: null,
     status_code: statusCode,
   };

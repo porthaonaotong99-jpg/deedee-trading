@@ -11,6 +11,7 @@ import {
   ValidationPipe,
   ParseUUIDPipe,
   ForbiddenException,
+  Req,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -18,11 +19,13 @@ import {
   ApiOperation,
   ApiQuery,
   ApiTags,
+  ApiResponse,
 } from '@nestjs/swagger';
 import { CustomersService } from './customers.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { AuthUser } from '../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../common/interfaces';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
@@ -30,6 +33,13 @@ import {
   handleSuccessMany,
   handleSuccessOne,
 } from '../../common/utils/response.util';
+import {
+  ForgotPasswordDto,
+  ResetPasswordWithOtpDto,
+  ResetPasswordWithTokenDto,
+  ForgotPasswordResponseDto,
+  ResetPasswordResponseDto,
+} from './dto/password-reset.dto';
 
 class CreateCustomerDto {
   username!: string;
@@ -101,7 +111,7 @@ export class CustomersController {
       // Reuse 403 semantics without importing ForbiddenException to keep minimal; could import instead.
       throw new ForbiddenException();
     }
-    const data = await this.service.findOne(user.sub);
+    const data = await this.service.findOneWithServices(user.sub);
     return handleSuccessOne({ data, message: 'Customer profile' });
   }
 
@@ -125,5 +135,104 @@ export class CustomersController {
   async remove(@Param('id', ParseUUIDPipe) id: string) {
     await this.service.remove(id);
     return handleSuccessOne({ data: null, message: 'Customer deleted' });
+  }
+
+  // --- Password Reset Endpoints ---
+
+  @Post('forgot-password')
+  @Public()
+  @ApiOperation({
+    summary: 'Send password reset instructions',
+    description: 'Send OTP or reset link to customer email for password reset',
+  })
+  @ApiBody({ type: ForgotPasswordDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset instructions sent successfully',
+    type: ForgotPasswordResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid request or too many attempts',
+  })
+  async forgotPassword(
+    @Body(ValidationPipe) dto: ForgotPasswordDto,
+    @Req() req: { headers: Record<string, unknown>; ip?: string },
+  ) {
+    const context = {
+      userAgent: req.headers['user-agent'] as string,
+      ipAddress: req.ip,
+    };
+    console.log({ context });
+
+    const result = await this.service.forgotPassword(dto, context);
+    return handleSuccessOne({
+      data: result,
+      message: 'Password reset instructions sent successfully',
+    });
+  }
+
+  @Post('reset-password/otp')
+  @Public()
+  @ApiOperation({
+    summary: 'Reset password using OTP',
+    description: 'Reset password using the OTP code received via email',
+  })
+  @ApiBody({ type: ResetPasswordWithOtpDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset successfully',
+    type: ResetPasswordResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid OTP, expired OTP, or validation error',
+  })
+  async resetPasswordWithOtp(
+    @Body(ValidationPipe) dto: ResetPasswordWithOtpDto,
+    @Req() req: { headers: Record<string, unknown>; ip?: string },
+  ) {
+    const context = {
+      userAgent: req.headers['user-agent'] as string,
+      ipAddress: req.ip,
+    };
+
+    const result = await this.service.resetPasswordWithOtp(dto, context);
+    return handleSuccessOne({
+      data: result,
+      message: 'Password reset successfully',
+    });
+  }
+
+  @Post('reset-password/token')
+  @Public()
+  @ApiOperation({
+    summary: 'Reset password using reset token',
+    description: 'Reset password using the reset token from email link',
+  })
+  @ApiBody({ type: ResetPasswordWithTokenDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset successfully',
+    type: ResetPasswordResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid token, expired token, or validation error',
+  })
+  async resetPasswordWithToken(
+    @Body(ValidationPipe) dto: ResetPasswordWithTokenDto,
+    @Req() req: { headers: Record<string, unknown>; ip?: string },
+  ) {
+    const context = {
+      userAgent: req.headers['user-agent'] as string,
+      ipAddress: req.ip,
+    };
+
+    const result = await this.service.resetPasswordWithToken(dto, context);
+    return handleSuccessOne({
+      data: result,
+      message: 'Password reset successfully',
+    });
   }
 }

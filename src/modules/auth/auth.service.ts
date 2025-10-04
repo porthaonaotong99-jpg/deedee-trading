@@ -46,6 +46,8 @@ import { CustomerRegisterDto } from './dto/register.dto';
 import { JwtPayload } from '../../common/interfaces';
 import { WalletsService } from '../wallets/wallets.service';
 import { SessionsService } from '../sessions/sessions.service';
+import { CustomersService } from '../customers/customers.service';
+import { CustomerServiceType } from '../customers/entities/customer-service.entity';
 import { parseDeviceContext } from '../../common/utils/device.util';
 import { lookupGeoLocation } from '../../common/utils/geoip.util';
 
@@ -60,6 +62,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly walletsService: WalletsService,
     private readonly sessionsService: SessionsService,
+    private readonly customersService: CustomersService,
   ) {}
 
   async loginUser(loginDto: LoginDto): Promise<LoginResponseDto> {
@@ -325,6 +328,17 @@ export class AuthService {
 
     // Create wallet for this customer (idempotent assumption: first creation only)
     const wallet = await this.walletsService.create({ customerId: saved.id });
+
+    // Automatically apply premium_stock_picks service and approve it immediately
+    try {
+      await this.customersService.applyService(
+        saved.id,
+        CustomerServiceType.PREMIUM_STOCK_PICKS,
+      );
+    } catch (error) {
+      // Log the error but don't fail registration if service application fails
+      console.error('Failed to auto-apply premium_stock_picks service:', error);
+    }
 
     return {
       id: saved.id,

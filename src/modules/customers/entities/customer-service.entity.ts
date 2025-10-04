@@ -15,6 +15,12 @@ export enum CustomerServiceType {
   GUARANTEED_RETURNS = 'guaranteed_returns',
 }
 
+export enum SubscriptionDuration {
+  THREE_MONTHS = 3,
+  SIX_MONTHS = 6,
+  TWELVE_MONTHS = 12,
+}
+
 @Entity('customer_services')
 export class CustomerService {
   @PrimaryGeneratedColumn('uuid')
@@ -32,6 +38,32 @@ export class CustomerService {
 
   @Column({ type: 'boolean', default: true })
   active: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  requires_payment: boolean;
+
+  @Column({
+    type: 'int',
+    nullable: true,
+    comment: 'Subscription duration in months (3, 6, or 12)',
+  })
+  subscription_duration: SubscriptionDuration | null;
+
+  @Column({
+    type: 'timestamp',
+    nullable: true,
+    comment: 'When the subscription expires',
+  })
+  subscription_expires_at: Date | null;
+
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+    comment: 'Subscription fee amount',
+  })
+  subscription_fee: number | null;
 
   @CreateDateColumn()
   applied_at: Date;

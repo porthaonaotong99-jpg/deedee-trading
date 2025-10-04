@@ -3,6 +3,42 @@
 import { CustomerServiceType } from '../entities/customer-service.entity';
 
 export const ServiceApplyRequestExamples = {
+  premiumMembership3Months: {
+    summary: 'Premium Membership - 3 Months',
+    value: {
+      service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+      subscription: {
+        duration: 3,
+        fee: 299.99,
+      },
+    },
+  },
+  premiumMembership6Months: {
+    summary: 'Premium Membership - 6 Months (Popular)',
+    value: {
+      service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+      subscription: {
+        duration: 6,
+        fee: 549.99,
+      },
+    },
+  },
+  premiumMembership12Months: {
+    summary: 'Premium Membership - 12 Months (Best Value)',
+    value: {
+      service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+      subscription: {
+        duration: 12,
+        fee: 999.99,
+      },
+    },
+  },
+  premiumStockPicks: {
+    summary: 'Premium Stock Picks (Free)',
+    value: {
+      service_type: CustomerServiceType.PREMIUM_STOCK_PICKS,
+    },
+  },
   internationalStockAccount: {
     summary: 'International Stock Account (advanced)',
     value: {
@@ -96,6 +132,29 @@ export const ServiceApplyRequestExamples = {
 };
 
 export const ServiceApplyResponseExamples = {
+  premiumMembershipPending: {
+    summary: 'Premium Membership - Payment Required',
+    value: {
+      status: 'pending_payment',
+      service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+      kyc_level: 'basic',
+      subscription: {
+        duration: 6,
+        expires_at: '2025-04-02T00:00:00.000Z',
+        fee: 549.99,
+        payment_status: 'pending',
+      },
+      message: 'Subscription created. Please complete payment to activate.',
+    },
+  },
+  premiumStockPicksActive: {
+    summary: 'Premium Stock Picks - Activated',
+    value: {
+      status: 'activated',
+      service_type: CustomerServiceType.PREMIUM_STOCK_PICKS,
+      kyc_level: 'basic',
+    },
+  },
   premiumActive: {
     summary: 'Premium active',
     value: {
