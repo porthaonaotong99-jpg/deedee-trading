@@ -76,7 +76,7 @@ export const ServiceApplyRequestExamples = {
           storage_ref: 's3://kyc-docs/intl001/id-back.jpg',
         },
         {
-          doc_type: 'address_proof',
+          doc_type: 'bank_statement',
           storage_ref: 's3://kyc-docs/intl001/utility-may.pdf',
         },
       ],

@@ -22,6 +22,9 @@ import { TransferHistoryModule } from './modules/transfer-history/transfer-histo
 import { UsersModule } from './modules/users/users.module';
 import { WalletsModule } from './modules/wallets/wallets.module';
 import { DemoModule } from './demo/demo.module';
+import { CountryModule } from './modules/country/country.module';
+import { ProvinceModule } from './modules/province/province.module';
+import { DistrictModule } from './modules/district/district.module';
 
 @Module({
   imports: [
@@ -52,6 +55,9 @@ import { DemoModule } from './demo/demo.module';
     UsersModule,
     WalletsModule,
     DemoModule,
+    CountryModule,
+    ProvinceModule,
+    DistrictModule,
   ],
   controllers: [AppController],
   providers: [AppService],

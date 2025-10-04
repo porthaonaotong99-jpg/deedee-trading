@@ -547,6 +547,7 @@ export class CustomersService {
     return this.dataSource.transaction(async (manager) => {
       const svcRepo = manager.getRepository(CustomerService);
       const kycRepo = manager.getRepository(CustomerKyc);
+      console.log({ id: serviceId, reviewerUserId, context });
 
       const service = await svcRepo.findOne({ where: { id: serviceId } });
       if (!service) {
