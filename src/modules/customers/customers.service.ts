@@ -379,9 +379,51 @@ export class CustomersService {
     const cfg = this.requiredConfig[serviceType];
     if (!cfg) throw new BadRequestException('Unsupported service');
 
-    // 3. ALWAYS create a fresh KYC for each service application (do not reuse existing)
-    // Pre-validate required KYC data (skip only if auto-approve service)
-    if (!cfg.autoApprove) {
+    // 3. KYC Handling Strategy
+    // For most services we create a fresh KYC (previous requirement). However, we now introduce
+    // a duplication rule between INTERNATIONAL_STOCK_ACCOUNT and GUARANTEED_RETURNS:
+    // If customer already has an APPROVED KYC for one of these and is applying for the other,
+    // we DUPLICATE that KYC record and associated documents automatically so user does not need to re-upload.
+    const ADVANCED_PAIR: CustomerServiceType[] = [
+      CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT,
+      CustomerServiceType.GUARANTEED_RETURNS,
+    ];
+    let sourceApprovedKyc: CustomerKyc | null = null;
+    let duplicateDocuments: CustomerDocument[] = [];
+
+    const isAdvancedPairTarget = ADVANCED_PAIR.includes(serviceType);
+    if (isAdvancedPairTarget) {
+      // Find existing approved KYC tied to the "other" advanced service (or any approved of those types)
+      // We search approved customer services of the alternate type having a kyc_id.
+      const existingOppositeServices = await this.customerServiceRepo.find({
+        where: {
+          customer_id: customerId,
+          service_type: In(ADVANCED_PAIR.filter((t) => t !== serviceType)),
+          active: true,
+        },
+        order: { applied_at: 'DESC' },
+      });
+      if (existingOppositeServices.length) {
+        // Load the most recent with a linked KYC
+        const withKyc = existingOppositeServices.filter((s) => s.kyc_id);
+        if (withKyc.length && withKyc[0].kyc_id) {
+          sourceApprovedKyc = await this.customerKycRepo.findOne({
+            where: { id: withKyc[0].kyc_id, status: KycStatus.APPROVED },
+          });
+          if (sourceApprovedKyc) {
+            // Load documents linked to that approved KYC only
+            duplicateDocuments = await this.customerDocumentRepo.find({
+              where: [
+                { customer_id: customerId, kyc_id: sourceApprovedKyc.id },
+              ],
+            });
+          }
+        }
+      }
+    }
+
+    // Pre-validate required KYC data ONLY if we are not duplicating from an existing approved KYC
+    if (!cfg.autoApprove && !sourceApprovedKyc) {
       if (!payload?.kyc) {
         throw new BadRequestException('KYC data required for this service');
       }
@@ -428,28 +470,67 @@ export class CustomersService {
         return { service: existingInside, status: 'already_active' };
       }
 
-      // (a) KYC (always create new per requirement)
+      // (a) KYC creation / duplication
       let kycRecord: CustomerKyc | null = null;
-      if (cfg.autoApprove) {
-        kycRecord = manager.getRepository(CustomerKyc).create({
+      const kycRepoTx = manager.getRepository(CustomerKyc);
+      const docRepoTx = manager.getRepository(CustomerDocument);
+
+      if (sourceApprovedKyc) {
+        // Duplicate approved KYC (copy selected fields explicitly)
+        kycRecord = kycRepoTx.create({
           customer_id: customerId,
-          kyc_level: cfg.level,
+          kyc_level: sourceApprovedKyc.kyc_level,
           status: KycStatus.APPROVED,
           submitted_at: new Date(),
-          reviewed_at: new Date(),
-          reviewed_by: null,
-          ...payload?.kyc, // allow extra optional fields
-        });
+          reviewed_at: sourceApprovedKyc.reviewed_at || new Date(),
+          reviewed_by: sourceApprovedKyc.reviewed_by || null,
+          nationality: sourceApprovedKyc.nationality,
+          employment_status: sourceApprovedKyc.employment_status,
+          annual_income: sourceApprovedKyc.annual_income,
+          investment_experience: sourceApprovedKyc.investment_experience,
+          source_of_funds: sourceApprovedKyc.source_of_funds,
+          risk_tolerance: sourceApprovedKyc.risk_tolerance,
+          dob: sourceApprovedKyc.dob,
+        } as Partial<CustomerKyc> as CustomerKyc);
+        kycRecord = await kycRepoTx.save(kycRecord);
+
+        if (duplicateDocuments.length) {
+          const clonedDocs = duplicateDocuments.map((d) =>
+            docRepoTx.create({
+              customer_id: customerId,
+              kyc_id: kycRecord!.id,
+              doc_type: d.doc_type,
+              storage_ref: d.storage_ref,
+              checksum: d.checksum,
+              encrypted: d.encrypted,
+              metadata: d.metadata,
+            }),
+          );
+          await docRepoTx.save(clonedDocs);
+        }
       } else {
-        kycRecord = manager.getRepository(CustomerKyc).create({
-          customer_id: customerId,
-          kyc_level: cfg.level,
-          status: KycStatus.PENDING,
-          ...payload?.kyc,
-          submitted_at: new Date(),
-        });
+        // Original behavior: create fresh KYC
+        if (cfg.autoApprove) {
+          kycRecord = kycRepoTx.create({
+            customer_id: customerId,
+            kyc_level: cfg.level,
+            status: KycStatus.APPROVED,
+            submitted_at: new Date(),
+            reviewed_at: new Date(),
+            reviewed_by: null,
+            ...payload?.kyc, // allow extra optional fields
+          });
+        } else {
+          kycRecord = kycRepoTx.create({
+            customer_id: customerId,
+            kyc_level: cfg.level,
+            status: KycStatus.PENDING,
+            ...payload?.kyc,
+            submitted_at: new Date(),
+          });
+        }
+        kycRecord = await kycRepoTx.save(kycRecord);
       }
-      kycRecord = await manager.getRepository(CustomerKyc).save(kycRecord);
 
       // (b) Upsert primary address
       if (payload?.address) {
@@ -470,10 +551,10 @@ export class CustomersService {
       }
 
       // (c) Documents (only those provided in this request)
-      if (payload?.documents?.length) {
-        const docRepo = manager.getRepository(CustomerDocument);
+      if (payload?.documents?.length && !sourceApprovedKyc) {
+        // Only add provided documents if we are NOT duplicating from an approved KYC (avoid duplicates)
         const docs: CustomerDocument[] = payload.documents.map((d) =>
-          docRepo.create({
+          docRepoTx.create({
             customer_id: customerId,
             kyc_id: kycRecord?.id,
             doc_type: d.doc_type,
@@ -483,7 +564,7 @@ export class CustomersService {
             metadata: null,
           }),
         );
-        await docRepo.save(docs);
+        await docRepoTx.save(docs);
       }
 
       // (d) Service activation
