@@ -83,11 +83,13 @@ export class ApplyServiceKycDto {
   @IsOptional()
   @IsEnum(EmploymentStatus)
   employment_status?: string;
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description: 'Annual income range string, e.g. "$10,000 - $100,000"',
+  })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  annual_income?: number;
+  @IsString()
+  @MaxLength(100)
+  annual_income?: string;
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

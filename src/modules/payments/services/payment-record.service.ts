@@ -5,19 +5,19 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { CustomerService } from '../entities/customer-service.entity';
+import {
+  Payment,
+  PaymentStatus,
+  PaymentMethod,
+  PaymentType,
+} from '../entities/payment.entity';
+import { CustomerService } from '../../customers/entities/customer-service.entity';
 import type { PaymentIntent } from './payment.service';
 import {
   PaymentAuditService,
   PaymentAuditContext,
+  PaymentAuditAction,
 } from './payment-audit.service';
-import {
-  Payment,
-  PaymentMethod,
-  PaymentStatus,
-  PaymentType,
-} from 'src/modules/payments/entities/payment.entity';
-import { PaymentAuditAction } from 'src/modules/payments/entities/payment-audit-log.entity';
 
 export interface CreatePaymentDto {
   customer_id: string;
@@ -62,7 +62,6 @@ export class PaymentRecordService {
 
     const savedPayment = await this.paymentRepo.save(payment);
 
-    // Log payment creation
     await this.paymentAuditService.logPaymentCreated(
       savedPayment.id,
       createPaymentDto.customer_id,
@@ -76,7 +75,6 @@ export class PaymentRecordService {
       createPaymentDto.context,
     );
 
-    // Log payment URL generation
     if (paymentIntent.payment_url) {
       await this.paymentAuditService.logPaymentUrlGenerated(
         savedPayment.id,
@@ -109,8 +107,6 @@ export class PaymentRecordService {
     }
 
     const previousStatus = payment.status;
-
-    // Update status and timestamp based on status
     payment.status = status;
 
     switch (status) {
@@ -150,14 +146,12 @@ export class PaymentRecordService {
     if (additionalData?.external_payment_id) {
       payment.external_payment_id = additionalData.external_payment_id;
     }
-
     if (additionalData?.provider_response) {
       payment.provider_response = additionalData.provider_response;
     }
 
     const updatedPayment = await this.paymentRepo.save(payment);
 
-    // Log general status change if different from specific logs above
     if (
       ![
         PaymentStatus.SUCCEEDED,
@@ -173,15 +167,11 @@ export class PaymentRecordService {
           : PaymentAuditAction.PAYMENT_INITIATED,
         `Payment status changed from ${previousStatus} to ${status}`,
         {
-          metadata: {
-            previous_status: previousStatus,
-            new_status: status,
-          },
+          metadata: { previous_status: previousStatus, new_status: status },
           context: additionalData?.context,
         },
       );
     }
-
     return updatedPayment;
   }
 
@@ -194,38 +184,23 @@ export class PaymentRecordService {
     const payment = await this.paymentRepo.findOne({
       where: { id: paymentId },
     });
-
-    if (!payment) {
-      throw new NotFoundException('Payment not found');
-    }
-
+    if (!payment) throw new NotFoundException('Payment not found');
     if (payment.status !== PaymentStatus.SUCCEEDED) {
       throw new BadRequestException('Can only refund successful payments');
     }
-
     const currentRefunded = payment.refunded_amount || 0;
     const totalRefunded = currentRefunded + refundAmount;
-
     if (totalRefunded > payment.amount) {
       throw new BadRequestException('Refund amount exceeds payment amount');
     }
-
     payment.refunded_amount = totalRefunded;
     payment.refunded_at = new Date();
-    if (refundReason) {
-      payment.refund_reason = refundReason;
-    }
-
-    // Update status based on refund amount
-    if (totalRefunded === payment.amount) {
-      payment.status = PaymentStatus.REFUNDED;
-    } else {
-      payment.status = PaymentStatus.PARTIALLY_REFUNDED;
-    }
-
-    const updatedPayment = await this.paymentRepo.save(payment);
-
-    // Log refund action
+    if (refundReason) payment.refund_reason = refundReason;
+    payment.status =
+      totalRefunded === payment.amount
+        ? PaymentStatus.REFUNDED
+        : PaymentStatus.PARTIALLY_REFUNDED;
+    const updated = await this.paymentRepo.save(payment);
     await this.paymentAuditService.logPaymentRefunded(
       payment.id,
       payment.customer_id,
@@ -233,8 +208,7 @@ export class PaymentRecordService {
       refundReason,
       context,
     );
-
-    return updatedPayment;
+    return updated;
   }
 
   async getPaymentsByCustomer(customerId: string): Promise<Payment[]> {
@@ -260,46 +234,5 @@ export class PaymentRecordService {
       where: { payment_intent_id: paymentIntentId },
       relations: ['service', 'customer'],
     });
-  }
-
-  async getPaymentHistory(
-    customerId: string,
-    options?: {
-      status?: PaymentStatus;
-      payment_type?: PaymentType;
-      limit?: number;
-      offset?: number;
-    },
-  ) {
-    const queryBuilder = this.paymentRepo
-      .createQueryBuilder('payment')
-      .leftJoinAndSelect('payment.service', 'service')
-      .where('payment.customer_id = :customerId', { customerId });
-
-    if (options?.status) {
-      queryBuilder.andWhere('payment.status = :status', {
-        status: options.status,
-      });
-    }
-
-    if (options?.payment_type) {
-      queryBuilder.andWhere('payment.payment_type = :payment_type', {
-        payment_type: options.payment_type,
-      });
-    }
-
-    queryBuilder
-      .orderBy('payment.created_at', 'DESC')
-      .limit(options?.limit || 50)
-      .offset(options?.offset || 0);
-
-    const [payments, total] = await queryBuilder.getManyAndCount();
-
-    return {
-      payments,
-      total,
-      limit: options?.limit || 50,
-      offset: options?.offset || 0,
-    };
   }
 }

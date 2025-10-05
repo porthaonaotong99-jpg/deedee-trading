@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import {
+  PaymentAuditLog,
   PaymentAuditAction,
   PaymentAuditLevel,
-  PaymentAuditLog,
-} from 'src/modules/payments/entities/payment-audit-log.entity';
-import { Repository } from 'typeorm';
+} from '../entities/payment-audit-log.entity';
 
 export interface CreatePaymentAuditLogDto {
   payment_id: string;
@@ -57,7 +57,6 @@ export class PaymentAuditService {
       performed_by: options?.context?.performed_by || null,
       external_reference: options?.context?.external_reference || null,
     });
-
     return this.auditRepo.save(auditLog);
   }
 
@@ -87,10 +86,7 @@ export class PaymentAuditService {
       customerId,
       PaymentAuditAction.PAYMENT_INITIATED,
       'Payment process initiated with payment provider',
-      {
-        metadata: { payment_url: paymentUrl },
-        context,
-      },
+      { metadata: { payment_url: paymentUrl }, context },
     );
   }
 
@@ -128,10 +124,7 @@ export class PaymentAuditService {
       customerId,
       PaymentAuditAction.PAYMENT_SUCCEEDED,
       'Payment completed successfully',
-      {
-        metadata: { amount, currency },
-        context,
-      },
+      { metadata: { amount, currency }, context },
     );
   }
 
@@ -187,10 +180,7 @@ export class PaymentAuditService {
       `Payment refunded: ${refundAmount}`,
       {
         level: PaymentAuditLevel.WARNING,
-        metadata: {
-          refund_amount: refundAmount,
-          refund_reason: refundReason,
-        },
+        metadata: { refund_amount: refundAmount, refund_reason: refundReason },
         context,
       },
     );
@@ -288,33 +278,23 @@ export class PaymentAuditService {
       action?: PaymentAuditAction;
       level?: PaymentAuditLevel;
     },
-  ): Promise<{
-    logs: PaymentAuditLog[];
-    total: number;
-  }> {
+  ): Promise<{ logs: PaymentAuditLog[]; total: number }> {
     const queryBuilder = this.auditRepo
       .createQueryBuilder('audit')
       .where('audit.payment_id = :paymentId', { paymentId });
-
     if (options?.action) {
       queryBuilder.andWhere('audit.action = :action', {
         action: options.action,
       });
     }
-
     if (options?.level) {
-      queryBuilder.andWhere('audit.level = :level', {
-        level: options.level,
-      });
+      queryBuilder.andWhere('audit.level = :level', { level: options.level });
     }
-
     queryBuilder
       .orderBy('audit.created_at', 'DESC')
       .limit(options?.limit || 50)
       .offset(options?.offset || 0);
-
     const [logs, total] = await queryBuilder.getManyAndCount();
-
     return { logs, total };
   }
 
@@ -326,34 +306,26 @@ export class PaymentAuditService {
       action?: PaymentAuditAction;
       level?: PaymentAuditLevel;
     },
-  ): Promise<{
-    logs: PaymentAuditLog[];
-    total: number;
-  }> {
+  ): Promise<{ logs: PaymentAuditLog[]; total: number }> {
     const queryBuilder = this.auditRepo
       .createQueryBuilder('audit')
       .leftJoinAndSelect('audit.payment', 'payment')
       .where('audit.customer_id = :customerId', { customerId });
-
     if (options?.action) {
       queryBuilder.andWhere('audit.action = :action', {
         action: options.action,
       });
     }
-
     if (options?.level) {
-      queryBuilder.andWhere('audit.level = :level', {
-        level: options.level,
-      });
+      queryBuilder.andWhere('audit.level = :level', { level: options.level });
     }
-
     queryBuilder
       .orderBy('audit.created_at', 'DESC')
       .limit(options?.limit || 50)
       .offset(options?.offset || 0);
-
     const [logs, total] = await queryBuilder.getManyAndCount();
-
     return { logs, total };
   }
 }
+
+export { PaymentAuditAction, PaymentAuditLevel };

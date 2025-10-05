@@ -7,7 +7,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Payment } from './payment.entity';
-import { Customer } from './customer.entity';
+import { Customer } from '../../customers/entities/customer.entity';
 
 export enum PaymentAuditAction {
   PAYMENT_CREATED = 'payment_created',

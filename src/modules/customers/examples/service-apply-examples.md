@@ -26,7 +26,7 @@ identity_front | identity_back | passport | bank_statement | address_proof | sel
 | kyc.nationality           | optional           | optional            | required                    | required                 |
 | kyc.marital_status        | -                  | -                   | required                    | required                 |
 | kyc.employment_status     | -                  | optional            | required                    | required                 |
-| kyc.annual_income         | -                  | optional            | required                    | required                 |
+| kyc.annual_income         | income range string (e.g. "$10,000 - $50,000") | optional            | required                    | required                 |
 | kyc.employer_name         | -                  | optional            | optional                    | required                 |
 | kyc.occupation            | -                  | optional            | required                    | required                 |
 | kyc.investment_experience | -                  | optional            | required                    | required                 |
@@ -50,7 +50,7 @@ Legend: '-' = not sent, optional = include if available, required = must be pres
 | Aspect            | Rule                                        |
 | ----------------- | ------------------------------------------- | ------------- | ---------- | ------- | ------- |
 | Date format       | dob: YYYY-MM-DD (UTC)                       |
-| Income            | annual_income: integer > 0                  |
+| Income            | annual_income: income range string (e.g. "$10,000 - $50,000") |
 | Experience        | investment_experience: integer >= 0 (years) |
 | Dependent number  | integer >= 0                                |
 | pep_flag          | boolean                                     |
@@ -76,7 +76,7 @@ Legend: '-' = not sent, optional = include if available, required = must be pres
     "nationality": "TH",
     "marital_status": "single",
     "employment_status": "employed",
-    "annual_income": 62000,
+  "annual_income": "$50,000 - $75,000",
     "employer_name": "Siam Finance Group",
     "occupation": "research_analyst",
     "investment_experience": 6,
@@ -121,7 +121,7 @@ Legend: '-' = not sent, optional = include if available, required = must be pres
     "nationality": "LA",
     "marital_status": "married",
     "employment_status": "self_employed",
-    "annual_income": 150000,
+  "annual_income": "$100,000 - $250,000",
     "employer_name": "Mekong Capital Partners",
     "occupation": "fund_manager",
     "investment_experience": 12,

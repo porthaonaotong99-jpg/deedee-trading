@@ -13,15 +13,14 @@ import { CustomerKyc } from './entities/customer-kyc.entity';
 import { CustomerDocument } from './entities/customer-document.entity';
 import { CustomerAddress } from './entities/customer-address.entity';
 import { PasswordReset } from './entities/password-reset.entity';
-import { Payment } from './entities/payment.entity';
-import { PaymentAuditLog } from './entities/payment-audit-log.entity';
 import { SubscriptionPackage } from './entities/subscription-package.entity';
+import { Payment } from '../payments/entities/payment.entity';
+import { PaymentAuditLog } from '../payments/entities/payment-audit-log.entity';
 import { CustomerKycServiceUsage } from './entities/customer-kyc-service-usage.entity';
 import { NodemailerEmailService } from './services/email.service';
-import { MockPaymentService } from './services/payment.service';
+// Payment related providers moved to PaymentsModule
+import { PaymentsModule } from '../payments/payments.module';
 import { SubscriptionSchedulerService } from './services/subscription-scheduler.service';
-import { PaymentRecordService } from './services/payment-record.service';
-import { PaymentAuditService } from './services/payment-audit.service';
 import { getJwtConfig } from '../../config/jwt.config';
 
 @Module({
@@ -33,9 +32,9 @@ import { getJwtConfig } from '../../config/jwt.config';
       CustomerDocument,
       CustomerAddress,
       PasswordReset,
+      SubscriptionPackage,
       Payment,
       PaymentAuditLog,
-      SubscriptionPackage,
       CustomerKycServiceUsage,
     ]),
     JwtModule.registerAsync({
@@ -43,6 +42,7 @@ import { getJwtConfig } from '../../config/jwt.config';
       useFactory: getJwtConfig,
       inject: [ConfigService],
     }),
+    PaymentsModule,
   ],
   controllers: [CustomersController, CustomerServicesController],
   providers: [
@@ -51,12 +51,6 @@ import { getJwtConfig } from '../../config/jwt.config';
       provide: 'EmailService',
       useClass: NodemailerEmailService,
     },
-    {
-      provide: 'PaymentService',
-      useClass: MockPaymentService,
-    },
-    PaymentRecordService,
-    PaymentAuditService,
     SubscriptionSchedulerService,
   ],
   exports: [CustomersService],

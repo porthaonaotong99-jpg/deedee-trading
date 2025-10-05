@@ -7,8 +7,8 @@ import {
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
-import { Customer } from './customer.entity';
-import { CustomerService } from './customer-service.entity';
+import { Customer } from '../../customers/entities/customer.entity';
+import { CustomerService } from '../../customers/entities/customer-service.entity';
 
 export enum PaymentMethod {
   CREDIT_CARD = 'credit_card',

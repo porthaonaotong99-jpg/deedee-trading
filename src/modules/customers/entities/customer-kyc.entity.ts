@@ -59,8 +59,9 @@ export class CustomerKyc {
   @Column({ type: 'enum', enum: EmploymentStatus, nullable: true })
   employment_status: EmploymentStatus | null;
 
-  @Column({ type: 'float', nullable: true })
-  annual_income: number | null;
+  // Changed to string range (e.g. "$10,000 - $100,000")
+  @Column({ type: 'varchar', nullable: true })
+  annual_income: string | null;
 
   @Column({ type: 'varchar', nullable: true })
   employer_name: string | null;

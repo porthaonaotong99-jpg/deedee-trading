@@ -37,7 +37,7 @@ import {
   PaymentStatus,
   PaymentMethod,
   PaymentType,
-} from './entities/payment.entity';
+} from '../payments/entities/payment.entity';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
   PaginationUtil,
@@ -54,15 +54,15 @@ import type { EmailService } from './interfaces/email.interface';
 
 import { SubscriptionDuration } from './entities/customer-service.entity';
 import type { PaymentProvider } from './services/payment.service';
-import { PaymentRecordService } from './services/payment-record.service';
+import { PaymentRecordService } from '../payments/services/payment-record.service';
 import {
   PaymentAuditService,
   PaymentAuditContext,
-} from './services/payment-audit.service';
+} from '../payments/services/payment-audit.service';
 import {
   PaymentAuditAction,
   PaymentAuditLevel,
-} from './entities/payment-audit-log.entity';
+} from '../payments/entities/payment-audit-log.entity';
 import { SubscriptionPackage } from './entities/subscription-package.entity';
 
 export interface PendingPremiumMembership {
