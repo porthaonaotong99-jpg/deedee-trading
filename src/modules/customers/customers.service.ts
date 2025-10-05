@@ -179,18 +179,36 @@ export class CustomersService {
     });
     if (!entity) throw new NotFoundException('Customer not found');
 
-    // Get customer services
+    // Get active customer services (include subscription data to compute expiry for premium membership)
     const services = await this.customerServiceRepo.find({
       where: { customer_id: id, active: true },
       select: {
         service_type: true,
+        subscription_expires_at: true,
+        subscription_duration: true,
+        subscription_fee: true,
+        active: true,
       },
       order: { applied_at: 'DESC' },
     });
 
+    const now = new Date();
+    const serviceResponses = services.map((s) => {
+      if (s.service_type === CustomerServiceType.PREMIUM_MEMBERSHIP) {
+        const expired =
+          !s.subscription_expires_at || s.subscription_expires_at < now;
+        return {
+          service_type: s.service_type,
+          expired,
+          subscription_expires_at: s.subscription_expires_at,
+        };
+      }
+      return { service_type: s.service_type };
+    });
+
     return {
       ...entity,
-      services: services.map((s) => s.service_type), // Return only service types
+      services: serviceResponses,
     };
   }
 
