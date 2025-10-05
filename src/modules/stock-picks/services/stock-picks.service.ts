@@ -412,9 +412,11 @@ export class StockPicksService {
           relations: ['customer', 'stock_pick'],
         });
 
-        // Send email if approved
+        // Send email notifications
         if (newStatus === CustomerPickStatus.APPROVED) {
           await this.sendStockPickEmail(updatedPick!);
+        } else if (newStatus === CustomerPickStatus.REJECTED) {
+          await this.sendRejectionEmail(updatedPick!);
         }
 
         return this.mapToCustomerPickResponseDto(updatedPick!);
@@ -460,6 +462,32 @@ export class StockPicksService {
       console.error('Failed to send stock pick email:', error);
       // Don't throw error to avoid transaction rollback
       // Email failure should not prevent approval
+    }
+  }
+
+  private async sendRejectionEmail(
+    customerPick: CustomerStockPick,
+  ): Promise<void> {
+    try {
+      const emailHtml = `
+        <h2>Your Stock Pick Submission Was Not Approved</h2>
+        <p>Dear ${customerPick.customer.first_name} ${customerPick.customer.last_name},</p>
+        <p>We reviewed your stock pick submission and it was <strong>rejected</strong>.</p>
+        <div style="background:#f8d7da;padding:15px;border-radius:5px;color:#842029;margin:20px 0;">
+          <p style="margin:0;"><strong>Reason:</strong><br>${customerPick.admin_response || 'No reason provided.'}</p>
+        </div>
+        <p>You can review available stock picks and submit again if you wish.</p>
+        <p>Regards,<br>Your Trading Team</p>
+      `;
+
+      await this.emailService.sendEmail({
+        to: customerPick.customer.email,
+        subject: 'Your Stock Pick Submission Was Not Approved',
+        html: emailHtml,
+        text: `Your stock pick submission was rejected. Reason: ${customerPick.admin_response || 'No reason provided.'}`,
+      });
+    } catch (error) {
+      console.error('Failed to send rejection email:', error);
     }
   }
 
