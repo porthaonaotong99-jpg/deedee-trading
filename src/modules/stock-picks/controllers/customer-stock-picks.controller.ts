@@ -200,7 +200,7 @@ export class CustomerStockPicksController {
   })
   @ApiParam({
     name: 'id',
-    description: 'Customer stock pick selection ID',
+    description: 'Stock pick selection ID',
   })
   @ApiBody({
     type: CustomerSubmitPaymentSlipDto,

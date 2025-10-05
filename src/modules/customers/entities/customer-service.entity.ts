@@ -7,6 +7,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Customer } from './customer.entity';
+import { CustomerKyc } from './customer-kyc.entity';
 
 export enum CustomerServiceType {
   PREMIUM_MEMBERSHIP = 'premium_membership',
@@ -64,6 +65,14 @@ export class CustomerService {
     comment: 'Subscription fee amount',
   })
   subscription_fee: number | null;
+
+  // KYC record used to approve/activate this service (if any)
+  @Column({ type: 'uuid', nullable: true })
+  kyc_id: string | null;
+
+  @ManyToOne(() => CustomerKyc, { nullable: true })
+  @JoinColumn({ name: 'kyc_id' })
+  kyc?: CustomerKyc | null;
 
   @CreateDateColumn()
   applied_at: Date;

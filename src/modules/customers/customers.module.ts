@@ -16,6 +16,7 @@ import { PasswordReset } from './entities/password-reset.entity';
 import { Payment } from './entities/payment.entity';
 import { PaymentAuditLog } from './entities/payment-audit-log.entity';
 import { SubscriptionPackage } from './entities/subscription-package.entity';
+import { CustomerKycServiceUsage } from './entities/customer-kyc-service-usage.entity';
 import { NodemailerEmailService } from './services/email.service';
 import { MockPaymentService } from './services/payment.service';
 import { SubscriptionSchedulerService } from './services/subscription-scheduler.service';
@@ -35,6 +36,7 @@ import { getJwtConfig } from '../../config/jwt.config';
       Payment,
       PaymentAuditLog,
       SubscriptionPackage,
+      CustomerKycServiceUsage,
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

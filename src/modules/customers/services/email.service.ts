@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
-import type SMTPTransport from 'nodemailer/lib/smtp-transport';
+import { createSmtpTransport } from '../../../common/email/smtp.config';
 import {
   EmailService,
   EmailOptions,
@@ -19,120 +19,11 @@ export class NodemailerEmailService implements EmailService {
   }
 
   private initializeTransporter(): void {
-    const host = this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com');
-    const port = Number(this.configService.get<number>('SMTP_PORT', 587));
-    // Robust boolean parsing for secure (tolerate 'true', 'false', '1', '0')
-    const secureRaw = this.configService.get<string>('SMTP_SECURE');
-    let secure = false;
-    if (typeof secureRaw === 'string') {
-      const lowered = secureRaw.trim().toLowerCase();
-      secure = ['true', '1', 'yes', 'y'].includes(lowered);
-    } else if (typeof secureRaw === 'boolean') {
-      secure = secureRaw;
-    }
-    const user = this.configService.get<string>('SMTP_USER');
-    let pass = this.configService.get<string>('SMTP_PASSWORD');
-    if (pass) {
-      // Strip surrounding quotes and internal spaces sometimes copied from UI for app passwords
-      pass = pass.replace(/^['"`](.*)['"`]$/u, '$1').replace(/\s+/g, '');
-    }
-    const ignoreTls =
-      this.configService.get<string>('SMTP_IGNORE_TLS') === 'true';
-    const requireTls =
-      this.configService.get<string>('SMTP_REQUIRE_TLS') === 'true';
-
-    // Auto-adjust secure based on common port conventions if user set a mismatched combination
-    if (port === 465 && secure === false) {
-      this.logger.warn(
-        'Port 465 detected but SMTP_SECURE=false. Overriding to secure=true (implicit SSL).',
-      );
-      secure = true;
-    } else if (port === 587 && secure === true) {
-      this.logger.warn(
-        'Port 587 detected with SMTP_SECURE=true. Overriding to secure=false (STARTTLS upgrade).',
-      );
-      secure = false;
-    }
-
-    const config: SMTPTransport.Options = {
-      host,
-      port,
-      secure,
-      auth: user && pass ? { user, pass } : undefined,
-      tls: {
-        rejectUnauthorized:
-          this.configService.get<string>(
-            'SMTP_TLS_REJECT_UNAUTHORIZED',
-            'true',
-          ) !== 'false',
-      },
-    };
-    console.log({ config });
-
-    if (ignoreTls || requireTls) {
-      const extendedConfig = config as SMTPTransport.Options & {
-        ignoreTLS?: boolean;
-        requireTLS?: boolean;
-      };
-      if (ignoreTls) extendedConfig.ignoreTLS = true;
-      if (requireTls) extendedConfig.requireTLS = true;
-    }
-
-    const debug = this.configService.get<string>('SMTP_DEBUG') === 'true';
-    this.logger.log(
-      `Initializing SMTP transporter: host=${host} port=${port} secure=${secure} auth=${user ? 'yes' : 'no'} ignoreTLS=${ignoreTls} requireTLS=${requireTls} debug=${debug}`,
+    this.transporter = createSmtpTransport(
+      this.configService,
+      this.logger,
+      'Customers',
     );
-    if (debug) {
-      this.logger.debug(
-        `Raw env => SMTP_SECURE='${secureRaw}' (parsed: ${secure}); PASSWORD_LENGTH=${pass ? pass.length : 0}`,
-      );
-    }
-
-    // Validate required configuration
-    if (!user || !pass) {
-      this.logger.warn(
-        'SMTP credentials not configured. Email functionality will be disabled.',
-      );
-      this.transporter = null;
-      return;
-    }
-
-    try {
-      this.transporter = nodemailer.createTransport({ ...config, debug });
-    } catch (ctorErr) {
-      this.logger.error('Failed to construct SMTP transporter', ctorErr);
-      this.transporter = null;
-      return;
-    }
-
-    // Verify the connection configuration
-    this.transporter.verify((error) => {
-      if (error) {
-        const hintParts: string[] = [];
-        if (/self signed/i.test(String(error))) {
-          hintParts.push(
-            'Self-signed certificate detected. Consider setting SMTP_TLS_REJECT_UNAUTHORIZED=false ONLY for development.',
-          );
-        }
-        if (/wrong version number/i.test(String(error))) {
-          hintParts.push(
-            'TLS version mismatch. Make sure port & secure match: 465 -> secure=true, 587 -> secure=false (STARTTLS).',
-          );
-        }
-        if (/certificate/i.test(String(error)) && port === 587 && secure) {
-          hintParts.push(
-            'Detected secure=true with port 587; change to SMTP_SECURE=false.',
-          );
-        }
-        this.logger.error('SMTP connection failed:', error);
-        if (hintParts.length) {
-          this.logger.warn('Troubleshooting hints:');
-          hintParts.forEach((h) => this.logger.warn(' - ' + h));
-        }
-      } else {
-        this.logger.log('SMTP server is ready to take our messages');
-      }
-    });
   }
 
   async sendEmail(options: EmailOptions): Promise<void> {

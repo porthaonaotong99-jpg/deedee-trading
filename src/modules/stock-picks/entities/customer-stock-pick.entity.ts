@@ -6,7 +6,6 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
-  Index,
 } from 'typeorm';
 import { Customer } from '../../customers/entities/customer.entity';
 import { StockPick } from './stock-pick.entity';
@@ -20,7 +19,7 @@ export enum CustomerPickStatus {
 }
 
 @Entity('customer_stock_picks')
-@Index(['customer_id', 'stock_pick_id'], { unique: true })
+// @Index(['customer_id', 'stock_pick_id'], { unique: true })
 export class CustomerStockPick {
   @PrimaryGeneratedColumn('uuid')
   id: string;

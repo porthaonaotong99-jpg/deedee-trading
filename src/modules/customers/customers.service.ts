@@ -21,6 +21,7 @@ import {
   KycLevel,
   KycStatus,
 } from './entities/customer-kyc.entity';
+import { CustomerKycServiceUsage } from './entities/customer-kyc-service-usage.entity';
 import { CustomerAddress } from './entities/customer-address.entity';
 import {
   CustomerDocument,
@@ -360,18 +361,9 @@ export class CustomersService {
     const cfg = this.requiredConfig[serviceType];
     if (!cfg) throw new BadRequestException('Unsupported service');
 
-    // 3. Fetch existing approved KYCs & determine sufficiency
-    const kycs = await this.customerKycRepo.find({
-      where: { customer_id: customerId, status: KycStatus.APPROVED },
-      order: { created_at: 'DESC' },
-    });
-    const sufficient = kycs.find(
-      (k) => this.kycLevelOrder(k.kyc_level) >= this.kycLevelOrder(cfg.level),
-    );
-    const needsNewKyc = !sufficient;
-
-    // 4. Pre-validate KYC fields if a new KYC will be needed (skip for auto-approve services)
-    if (needsNewKyc && !cfg.autoApprove) {
+    // 3. ALWAYS create a fresh KYC for each service application (do not reuse existing)
+    // Pre-validate required KYC data (skip only if auto-approve service)
+    if (!cfg.autoApprove) {
       if (!payload?.kyc) {
         throw new BadRequestException('KYC data required for this service');
       }
@@ -418,10 +410,19 @@ export class CustomersService {
         return { service: existingInside, status: 'already_active' };
       }
 
-      // (a) KYC (create if required)
-      let kycRecord = sufficient;
-      if (!kycRecord && !cfg.autoApprove) {
-        // Only create KYC for services that are not auto-approved
+      // (a) KYC (always create new per requirement)
+      let kycRecord: CustomerKyc | null = null;
+      if (cfg.autoApprove) {
+        kycRecord = manager.getRepository(CustomerKyc).create({
+          customer_id: customerId,
+          kyc_level: cfg.level,
+          status: KycStatus.APPROVED,
+          submitted_at: new Date(),
+          reviewed_at: new Date(),
+          reviewed_by: null,
+          ...payload?.kyc, // allow extra optional fields
+        });
+      } else {
         kycRecord = manager.getRepository(CustomerKyc).create({
           customer_id: customerId,
           kyc_level: cfg.level,
@@ -429,19 +430,8 @@ export class CustomersService {
           ...payload?.kyc,
           submitted_at: new Date(),
         });
-        kycRecord = await manager.getRepository(CustomerKyc).save(kycRecord);
-      } else if (!kycRecord && cfg.autoApprove) {
-        // For auto-approve services, create a basic approved KYC
-        kycRecord = manager.getRepository(CustomerKyc).create({
-          customer_id: customerId,
-          kyc_level: cfg.level,
-          status: KycStatus.APPROVED,
-          submitted_at: new Date(),
-          reviewed_at: new Date(),
-          reviewed_by: null, // System auto-approval (UUID field cannot have string)
-        });
-        kycRecord = await manager.getRepository(CustomerKyc).save(kycRecord);
       }
+      kycRecord = await manager.getRepository(CustomerKyc).save(kycRecord);
 
       // (b) Upsert primary address
       if (payload?.address) {
@@ -516,6 +506,7 @@ export class CustomersService {
         subscription_duration: payload?.subscription?.duration || null,
         subscription_expires_at: subscriptionExpiresAt,
         subscription_fee: subscriptionFee,
+        kyc_id: kycRecord?.id,
       });
       const savedService = await manager
         .getRepository(CustomerService)
@@ -547,9 +538,11 @@ export class CustomersService {
     return this.dataSource.transaction(async (manager) => {
       const svcRepo = manager.getRepository(CustomerService);
       const kycRepo = manager.getRepository(CustomerKyc);
-      console.log({ id: serviceId, reviewerUserId, context });
+      const usageRepo = manager.getRepository(CustomerKycServiceUsage);
 
-      const service = await svcRepo.findOne({ where: { id: serviceId } });
+      const service = await svcRepo.findOne({
+        where: { id: serviceId },
+      });
       if (!service) {
         throw new NotFoundException('Service application not found');
       }
@@ -575,9 +568,39 @@ export class CustomersService {
           );
         }
 
+        // If there is an approved KYC already meeting requirements, link it (optional for payment+admin cases)
+        let linkedKyc: CustomerKyc | undefined;
+        const approvedKycs = await kycRepo.find({
+          where: {
+            customer_id: service.customer_id,
+            status: KycStatus.APPROVED,
+          },
+          order: { created_at: 'DESC' },
+        });
+        if (approvedKycs.length) {
+          linkedKyc = approvedKycs[0];
+          service.kyc_id = linkedKyc.id;
+        }
+
         // Activate the service
         service.active = true;
         const savedService = await svcRepo.save(service);
+
+        // Record usage if kyc linked
+        if (linkedKyc) {
+          await usageRepo.insert({
+            kyc_id: linkedKyc.id,
+            service_id: savedService.id,
+            purpose: 'activation',
+            kyc_snapshot: {
+              kyc_level: linkedKyc.kyc_level,
+              reviewed_at: linkedKyc.reviewed_at
+                ? linkedKyc.reviewed_at.toISOString()
+                : undefined,
+              status: linkedKyc.status,
+            },
+          });
+        }
 
         // Log admin approval
         await this.paymentAuditService.logAdminApproved(
@@ -622,7 +645,22 @@ export class CustomersService {
       await kycRepo.save(pendingKyc);
 
       service.active = true;
+      service.kyc_id = pendingKyc.id;
       const savedService = await svcRepo.save(service);
+
+      await usageRepo.insert({
+        kyc_id: pendingKyc.id,
+        service_id: savedService.id,
+        purpose: 'activation',
+        kyc_snapshot: {
+          kyc_level: pendingKyc.kyc_level,
+          reviewed_at: pendingKyc.reviewed_at
+            ? pendingKyc.reviewed_at.toISOString()
+            : undefined,
+          status: pendingKyc.status,
+        },
+      });
+
       return { service: savedService, kyc: pendingKyc, status: 'activated' };
     });
   }
@@ -732,6 +770,7 @@ export class CustomersService {
     level?: KycLevel;
     customer_id?: string;
   }) {
+    // TypeORM-based optimized approach (no manual raw SQL)
     const { page, limit, skip } = PaginationUtil.calculatePagination({
       page: options.page,
       limit: options.limit,
@@ -739,19 +778,85 @@ export class CustomersService {
       maxLimit: 100,
     });
 
-    const where: Record<string, unknown> = {};
-    if (options.status) where.status = options.status;
-    if (options.level) where.kyc_level = options.level;
-    if (options.customer_id) where.customer_id = options.customer_id;
+    // 1. Fetch KYC page with filters
+    const qb = this.customerKycRepo.createQueryBuilder('k');
+    if (options.status) {
+      qb.andWhere('k.status = :status', { status: options.status });
+    }
+    if (options.level) {
+      qb.andWhere('k.kyc_level = :level', { level: options.level });
+    }
+    if (options.customer_id) {
+      qb.andWhere('k.customer_id = :cid', { cid: options.customer_id });
+    }
 
-    const [data, total] = await this.customerKycRepo.findAndCount({
-      where,
-      take: limit,
-      skip,
-      order: { created_at: 'DESC' },
+    const [kycRecords, total] = await qb
+      .orderBy('k.created_at', 'DESC')
+      .skip(skip)
+      .take(limit)
+      .getManyAndCount();
+
+    if (!kycRecords.length) {
+      return PaginationUtil.createPaginatedResult([], total, { page, limit });
+    }
+
+    const kycIds = kycRecords.map((k) => k.id);
+
+    // 2. Fetch direct services referencing these KYCs (single query)
+    const directServices = await this.customerServiceRepo.find({
+      where: kycIds.map((id) => ({ kyc_id: id })),
+      order: { applied_at: 'DESC' },
     });
 
-    return PaginationUtil.createPaginatedResult(data, total, {
+    // 3. Fetch usage rows (if table exists) + associated services (2 queries total, try/catch to skip if not migrated yet)
+    let usageServices: CustomerService[] = [];
+    try {
+      const usageRows = await this.dataSource
+        .getRepository(CustomerKycServiceUsage)
+        .find({ where: kycIds.map((id) => ({ kyc_id: id })) });
+      const usageServiceIds = Array.from(
+        new Set(usageRows.map((u) => u.service_id)),
+      );
+      if (usageServiceIds.length) {
+        usageServices = await this.customerServiceRepo.find({
+          where: usageServiceIds.map((sid) => ({ id: sid })),
+        });
+      }
+    } catch {
+      // ignore (usage table may not exist yet)
+    }
+
+    // 4. Combine services deduplicated per KYC
+    const allServicesById = new Map<string, CustomerService>();
+    [...directServices, ...usageServices].forEach((svc) => {
+      if (!allServicesById.has(svc.id)) allServicesById.set(svc.id, svc);
+    });
+
+    const servicesByKyc: Record<string, CustomerService[]> = {};
+    directServices.forEach((svc) => {
+      if (!svc.kyc_id) return;
+      (servicesByKyc[svc.kyc_id] = servicesByKyc[svc.kyc_id] || []).push(svc);
+    });
+    usageServices.forEach((svc) => {
+      if (!svc.kyc_id) return; // usage-based link may not set kyc_id on svc (if old record); skip if missing
+      const arr = (servicesByKyc[svc.kyc_id] = servicesByKyc[svc.kyc_id] || []);
+      if (!arr.some((s) => s.id === svc.id)) arr.push(svc);
+    });
+
+    // 5. Shape response
+    const enriched = kycRecords.map((k) => ({
+      ...k,
+      services: (servicesByKyc[k.id] || []).map((s) => ({
+        id: s.id,
+        service_type: s.service_type,
+        active: s.active,
+        subscription_duration: s.subscription_duration,
+        subscription_expires_at: s.subscription_expires_at,
+        applied_at: s.applied_at,
+      })),
+    }));
+
+    return PaginationUtil.createPaginatedResult(enriched, total, {
       page,
       limit,
     });
@@ -1932,7 +2037,6 @@ export class CustomersService {
       const successfulPayment = payments.find(
         (payment) => payment.status === PaymentStatus.PENDING,
       );
-      console.log({ successfulPayment });
 
       if (successfulPayment) {
         servicesWithPayments.push({

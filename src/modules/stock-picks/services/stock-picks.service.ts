@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, MoreThan, Not } from 'typeorm';
 import { StockPick } from '../entities/stock-pick.entity';
 import {
   CustomerStockPick,
@@ -190,7 +190,20 @@ export class StockPicksService {
 
     const [data, total] = await queryBuilder.getManyAndCount();
 
-    const mappedData = data.map((pick) => this.mapToCustomerViewDto(pick));
+    // Fetch customer's non-rejected selections for quick lookup
+    const customerSelections = await this.customerPickRepo.find({
+      where: { customer_id: customerId },
+      select: ['stock_pick_id', 'status'],
+    });
+    const selectedSet = new Set(
+      customerSelections
+        .filter((s) => s.status !== CustomerPickStatus.REJECTED)
+        .map((s) => s.stock_pick_id),
+    );
+
+    const mappedData = data.map((pick) =>
+      this.mapToCustomerViewDto(pick, selectedSet.has(pick.id)),
+    );
 
     return PaginationUtil.createPaginatedResult(mappedData, total, {
       page,
@@ -235,54 +248,68 @@ export class StockPicksService {
   // Payment slip methods
   async submitPaymentSlip(
     customerId: string,
-    customerPickId: string,
+    stockPickId: string,
     paymentSlipDto: CustomerSubmitPaymentSlipDto,
   ): Promise<CustomerStockPickResponseDto> {
-    return await this.dataSource.transaction(
-      async (transactionalEntityManager) => {
-        const customerPickRepo =
-          transactionalEntityManager.getRepository(CustomerStockPick);
+    return this.dataSource.transaction(async (manager) => {
+      const stockPickRepo = manager.getRepository(StockPick);
+      const customerPickRepo = manager.getRepository(CustomerStockPick);
 
-        const customerPick = await customerPickRepo.findOne({
-          where: {
-            id: customerPickId,
-            customer_id: customerId,
-          },
-          relations: ['customer', 'stock_pick'],
-        });
+      // 1. Validate stock pick exists & is active / not expired
+      const stockPick = await stockPickRepo.findOne({
+        where: {
+          id: stockPickId,
+          is_active: true,
+          expires_at: MoreThan(new Date()),
+        },
+      });
+      if (!stockPick) {
+        throw new NotFoundException('Stock pick not found');
+      }
+      if (!stockPick.is_active) {
+        throw new BadRequestException('Stock pick is not active');
+      }
+      if (stockPick.expires_at && stockPick.expires_at <= new Date()) {
+        throw new BadRequestException('Stock pick has expired');
+      }
 
-        if (!customerPick) {
-          throw new NotFoundException(
-            'Customer pick not found or you do not have permission to access it',
-          );
-        }
+      // 2. Enforce single submission per customer per stock pick (pending or approved etc.)
+      const existing = await customerPickRepo.findOne({
+        where: {
+          customer_id: customerId,
+          stock_pick_id: stockPickId,
+          status: Not(CustomerPickStatus.REJECTED),
+        },
+      });
+      if (existing) {
+        throw new BadRequestException(
+          'You already submitted for this stock pick',
+        );
+      }
 
-        if (customerPick.status !== CustomerPickStatus.SELECTED) {
-          throw new BadRequestException(
-            'Payment slip can only be submitted for selected picks',
-          );
-        }
+      // 3. Create new CustomerStockPick with payment slip data
+      const pickEntity = customerPickRepo.create({
+        customer_id: customerId,
+        stock_pick_id: stockPickId,
+        status: CustomerPickStatus.PAYMENT_SUBMITTED,
+        payment_slip_url: paymentSlipDto.payment_slip_url,
+        payment_slip_filename: paymentSlipDto.payment_slip_filename,
+        payment_amount: paymentSlipDto.payment_amount,
+        payment_reference: paymentSlipDto.payment_reference || null,
+        customer_notes: paymentSlipDto.payment_notes || null,
+        payment_submitted_at: new Date(),
+        selected_at: new Date(),
+      });
+      const saved = await customerPickRepo.save(pickEntity);
 
-        // Update the customer pick with payment slip information
-        await customerPickRepo.update(customerPickId, {
-          payment_slip_url: paymentSlipDto.payment_slip_url,
-          payment_slip_filename: paymentSlipDto.payment_slip_filename,
-          payment_amount: paymentSlipDto.payment_amount,
-          payment_reference: paymentSlipDto.payment_reference,
-          customer_notes:
-            paymentSlipDto.payment_notes || customerPick.customer_notes,
-          payment_submitted_at: new Date(),
-          status: CustomerPickStatus.PAYMENT_SUBMITTED,
-        });
+      // 4. Reload with relations for response shaping (symbol hidden until approved logic is preserved)
+      const full = await customerPickRepo.findOne({
+        where: { id: saved.id },
+        relations: ['stock_pick'],
+      });
 
-        const updatedPick = await customerPickRepo.findOne({
-          where: { id: customerPickId },
-          relations: ['customer', 'stock_pick'],
-        });
-
-        return this.mapToCustomerPickResponseDto(updatedPick!);
-      },
-    );
+      return this.mapToCustomerPickResponseDto(full!);
+    });
   }
 
   // Admin approval methods
@@ -425,10 +452,10 @@ export class StockPicksService {
       });
 
       // Update email sent timestamp
-      await this.customerPickRepo.update(customerPick.id, {
-        status: CustomerPickStatus.EMAIL_SENT,
-        email_sent_at: new Date(),
-      });
+      // await this.customerPickRepo.update(customerPick.id, {
+      //   status: CustomerPickStatus.EMAIL_SENT,
+      //   email_sent_at: new Date(),
+      // });
     } catch (error) {
       console.error('Failed to send stock pick email:', error);
       // Don't throw error to avoid transaction rollback
@@ -456,7 +483,10 @@ export class StockPicksService {
     };
   }
 
-  private mapToCustomerViewDto(stockPick: StockPick): CustomerViewStockPickDto {
+  private mapToCustomerViewDto(
+    stockPick: StockPick,
+    isSelected = false,
+  ): CustomerViewStockPickDto {
     return {
       id: stockPick.id,
       description: stockPick.description,
@@ -466,6 +496,7 @@ export class StockPicksService {
       current_price: stockPick.current_price ?? undefined,
       expires_at: stockPick.expires_at ?? undefined,
       created_at: stockPick.created_at,
+      is_selected: isSelected,
       // Note: stock_symbol is intentionally excluded
     };
   }

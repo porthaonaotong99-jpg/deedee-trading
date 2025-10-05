@@ -484,4 +484,9 @@ export class CustomerViewStockPickDto {
   created_at: Date;
 
   // Note: stock_symbol is intentionally excluded for security
+  @ApiProperty({
+    description:
+      'Whether the authenticated customer has an active (non-rejected) selection for this pick',
+  })
+  is_selected: boolean;
 }

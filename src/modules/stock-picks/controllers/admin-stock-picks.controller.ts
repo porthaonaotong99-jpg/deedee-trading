@@ -10,6 +10,7 @@ import {
   UseGuards,
   ValidationPipe,
   ForbiddenException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -282,7 +283,7 @@ export class AdminStockPicksController {
     description: 'Customer pick is not in selected status',
   })
   async approveCustomerPick(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body(ValidationPipe) approveDto: AdminApprovePickDto,
     @AuthUser() user: JwtPayload,
   ) {
@@ -335,7 +336,7 @@ export class AdminStockPicksController {
     type: CustomerStockPickResponseDto,
   })
   async rejectCustomerPick(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() body: { admin_response: string },
     @AuthUser() user: JwtPayload,
   ) {

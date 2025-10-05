@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import { createSmtpTransport } from '../../../common/email/smtp.config';
 import {
   EmailService,
   EmailOptions,
@@ -18,35 +19,11 @@ export class NodemailerEmailService implements EmailService {
   }
 
   private initializeTransporter(): void {
-    const config = {
-      host: this.configService.get<string>('SMTP_HOST', 'smtp.gmail.com'),
-      port: this.configService.get<number>('SMTP_PORT', 587),
-      secure: this.configService.get<boolean>('SMTP_SECURE', false), // true for 465, false for other ports
-      auth: {
-        user: this.configService.get<string>('SMTP_USER'),
-        pass: this.configService.get<string>('SMTP_PASSWORD'),
-      },
-    };
-
-    // Validate required configuration
-    if (!config.auth.user || !config.auth.pass) {
-      this.logger.warn(
-        'SMTP credentials not configured. Email functionality will be disabled.',
-      );
-      this.transporter = null;
-      return;
-    }
-
-    this.transporter = nodemailer.createTransport(config);
-
-    // Verify the connection configuration
-    this.transporter.verify((error) => {
-      if (error) {
-        this.logger.error('SMTP connection failed:', error);
-      } else {
-        this.logger.log('SMTP server is ready to take our messages');
-      }
-    });
+    this.transporter = createSmtpTransport(
+      this.configService,
+      this.logger,
+      'StockPicks',
+    );
   }
 
   async sendEmail(options: EmailOptions): Promise<void> {
@@ -86,7 +63,15 @@ export class NodemailerEmailService implements EmailService {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Failed to send email to ${options.to}:`, error);
+      this.logger.error(
+        `Failed to send stock pick email to ${options.to}:`,
+        error,
+      );
+      if (/wrong version number/i.test(errorMessage)) {
+        throw new Error(
+          `Failed to send email: TLS negotiation failed (wrong version number). Check SMTP_PORT & SMTP_SECURE combination. ${errorMessage}`,
+        );
+      }
       throw new Error(`Failed to send email: ${errorMessage}`);
     }
   }
