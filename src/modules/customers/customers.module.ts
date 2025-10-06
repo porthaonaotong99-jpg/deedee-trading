@@ -22,6 +22,7 @@ import { NodemailerEmailService } from './services/email.service';
 import { PaymentsModule } from '../payments/payments.module';
 import { SubscriptionSchedulerService } from './services/subscription-scheduler.service';
 import { getJwtConfig } from '../../config/jwt.config';
+import { ServiceFundTransaction } from './entities/service-fund-transaction.entity';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { getJwtConfig } from '../../config/jwt.config';
       Payment,
       PaymentAuditLog,
       CustomerKycServiceUsage,
+      ServiceFundTransaction,
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

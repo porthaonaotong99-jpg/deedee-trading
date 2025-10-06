@@ -5,7 +5,11 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { Customer } from '../../customers/entities/customer.entity';
+import { CustomerService } from '../../customers/entities/customer-service.entity';
 
 @Entity('investment_info')
 export class InvestmentInfo {
@@ -47,6 +51,37 @@ export class InvestmentInfo {
 
   @Column({ type: 'varchar', nullable: true })
   payment_type: string;
+
+  // Relations / Foreign Keys (nullable initially until data backfilled)
+  @Column({ type: 'uuid', nullable: true })
+  customer_id: string | null;
+
+  @ManyToOne(() => Customer, { nullable: true })
+  @JoinColumn({ name: 'customer_id' })
+  customer?: Customer | null;
+
+  @Column({
+    type: 'uuid',
+    nullable: true,
+    comment: 'Target customer service (guaranteed_returns)',
+  })
+  service_id: string | null;
+
+  @ManyToOne(() => CustomerService, { nullable: true })
+  @JoinColumn({ name: 'service_id' })
+  service?: CustomerService | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  approved_by: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  approved_at: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  rejected_by: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  rejected_at: Date | null;
 
   @Column({
     type: 'enum',

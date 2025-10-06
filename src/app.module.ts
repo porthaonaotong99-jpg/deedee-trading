@@ -25,6 +25,7 @@ import { DemoModule } from './demo/demo.module';
 import { CountryModule } from './modules/country/country.module';
 import { ProvinceModule } from './modules/province/province.module';
 import { DistrictModule } from './modules/district/district.module';
+import { InvestmentInfoModule } from './modules/investment-info/investment-info.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { DistrictModule } from './modules/district/district.module';
     CountryModule,
     ProvinceModule,
     DistrictModule,
+    InvestmentInfoModule,
   ],
   controllers: [AppController],
   providers: [AppService],

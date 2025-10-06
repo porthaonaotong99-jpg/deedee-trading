@@ -64,6 +64,11 @@ import {
   PaymentAuditLevel,
 } from '../payments/entities/payment-audit-log.entity';
 import { SubscriptionPackage } from './entities/subscription-package.entity';
+import {
+  ServiceFundTransaction,
+  ServiceFundTransactionType,
+} from './entities/service-fund-transaction.entity';
+import { TopupServiceDto, TransferFundsDto } from './dto/funds.dto';
 
 export interface PendingPremiumMembership {
   service_id: string;
@@ -117,6 +122,8 @@ export class CustomersService {
     private readonly paymentRepo: Repository<Payment>,
     @InjectRepository(SubscriptionPackage)
     private readonly subscriptionPackageRepo: Repository<SubscriptionPackage>,
+    @InjectRepository(ServiceFundTransaction)
+    private readonly serviceFundTxRepo: Repository<ServiceFundTransaction>,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly jwtService: JwtService,
@@ -343,6 +350,102 @@ export class CustomersService {
     });
   }
 
+  async topupInternationalAccount(
+    customerId: string,
+    serviceId: string,
+    dto: TopupServiceDto,
+  ) {
+    if (dto.amount <= 0) throw new BadRequestException('Amount must be > 0');
+    return this.dataSource.transaction(async (manager) => {
+      const service = await manager.findOne(this.customerServiceRepo.target, {
+        where: { id: serviceId, customer_id: customerId },
+      });
+      if (!service) throw new NotFoundException('Service not found');
+      if (
+        service.service_type !== CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT
+      ) {
+        throw new BadRequestException(
+          'Service is not an international stock account',
+        );
+      }
+      if (!service.active)
+        throw new BadRequestException('Service is not active');
+      service.balance = Number(service.balance) + dto.amount;
+      await manager.save(service);
+      const tx = this.serviceFundTxRepo.create({
+        customer_id: customerId,
+        to_service_id: service.id,
+        tx_type: ServiceFundTransactionType.TOPUP,
+        amount: dto.amount,
+        reference: dto.reference || null,
+        description: 'International account top-up',
+      });
+      await manager.save(tx);
+      return {
+        service_id: service.id,
+        balance: service.balance,
+        transaction_id: tx.id,
+      };
+    });
+  }
+
+  async transferToGuaranteedReturns(customerId: string, dto: TransferFundsDto) {
+    if (dto.amount <= 0) throw new BadRequestException('Amount must be > 0');
+    if (dto.from_service_id === dto.to_service_id) {
+      throw new BadRequestException(
+        'from_service_id and to_service_id must differ',
+      );
+    }
+    return this.dataSource.transaction(async (manager) => {
+      const from = await manager.findOne(this.customerServiceRepo.target, {
+        where: { id: dto.from_service_id, customer_id: customerId },
+      });
+      const to = await manager.findOne(this.customerServiceRepo.target, {
+        where: { id: dto.to_service_id, customer_id: customerId },
+      });
+      if (!from || !to)
+        throw new NotFoundException('Source or destination service not found');
+      if (
+        from.service_type !== CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT
+      ) {
+        throw new BadRequestException(
+          'Source must be INTERNATIONAL_STOCK_ACCOUNT',
+        );
+      }
+      if (to.service_type !== CustomerServiceType.GUARANTEED_RETURNS) {
+        throw new BadRequestException('Destination must be GUARANTEED_RETURNS');
+      }
+      if (!from.active || !to.active)
+        throw new BadRequestException('Both services must be active');
+      if (Number(from.balance) < dto.amount) {
+        throw new BadRequestException(
+          'Insufficient balance in international account',
+        );
+      }
+      from.balance = Number(from.balance) - dto.amount;
+      to.invested_amount = Number(to.invested_amount) + dto.amount;
+      await manager.save(from);
+      await manager.save(to);
+      const tx = this.serviceFundTxRepo.create({
+        customer_id: customerId,
+        from_service_id: from.id,
+        to_service_id: to.id,
+        tx_type: ServiceFundTransactionType.TRANSFER,
+        amount: dto.amount,
+        reference: dto.reference || null,
+        description: 'Transfer international -> guaranteed returns',
+      });
+      await manager.save(tx);
+      return {
+        from_service_id: from.id,
+        to_service_id: to.id,
+        new_source_balance: from.balance,
+        new_destination_invested_amount: to.invested_amount,
+        transaction_id: tx.id,
+      };
+    });
+  }
+
   async applyService(
     customerId: string,
     serviceType: CustomerServiceType,
@@ -379,84 +482,11 @@ export class CustomersService {
     const cfg = this.requiredConfig[serviceType];
     if (!cfg) throw new BadRequestException('Unsupported service');
 
-    // 3. KYC Handling Strategy
-    // For most services we create a fresh KYC (previous requirement). However, we now introduce
-    // a duplication rule between INTERNATIONAL_STOCK_ACCOUNT and GUARANTEED_RETURNS:
-    // If customer already has an APPROVED KYC for one of these and is applying for the other,
-    // we DUPLICATE that KYC record and associated documents automatically so user does not need to re-upload.
-    const ADVANCED_PAIR: CustomerServiceType[] = [
-      CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT,
-      CustomerServiceType.GUARANTEED_RETURNS,
-    ];
-    let sourceApprovedKyc: CustomerKyc | null = null;
-    let duplicateDocuments: CustomerDocument[] = [];
-
-    const isAdvancedPairTarget = ADVANCED_PAIR.includes(serviceType);
-    if (isAdvancedPairTarget) {
-      // Find existing approved KYC tied to the "other" advanced service (or any approved of those types)
-      // We search approved customer services of the alternate type having a kyc_id.
-      const existingOppositeServices = await this.customerServiceRepo.find({
-        where: {
-          customer_id: customerId,
-          service_type: In(ADVANCED_PAIR.filter((t) => t !== serviceType)),
-          active: true,
-        },
-        order: { applied_at: 'DESC' },
-      });
-      if (existingOppositeServices.length) {
-        // Load the most recent with a linked KYC
-        const withKyc = existingOppositeServices.filter((s) => s.kyc_id);
-        if (withKyc.length && withKyc[0].kyc_id) {
-          sourceApprovedKyc = await this.customerKycRepo.findOne({
-            where: { id: withKyc[0].kyc_id, status: KycStatus.APPROVED },
-          });
-          if (sourceApprovedKyc) {
-            // Load documents linked to that approved KYC only
-            duplicateDocuments = await this.customerDocumentRepo.find({
-              where: [
-                { customer_id: customerId, kyc_id: sourceApprovedKyc.id },
-              ],
-            });
-          }
-        }
-      }
-    }
-
-    // Pre-validate required KYC data ONLY if we are not duplicating from an existing approved KYC
-    if (!cfg.autoApprove && !sourceApprovedKyc) {
-      if (!payload?.kyc) {
-        throw new BadRequestException('KYC data required for this service');
-      }
-      const missingFields = cfg.requiredFields.filter(
-        (f) => (payload.kyc as Record<string, unknown>)[f] == null,
-      );
-      if (missingFields.length) {
-        throw new BadRequestException(
-          `Missing required KYC fields: ${missingFields.join(', ')}`,
-        );
-      }
-    }
-
-    // 5. Pre-validate required documents BEFORE starting transaction (to avoid unnecessary writes)
-    if (cfg.requiredDocs.length) {
-      const existingDocs = await this.customerDocumentRepo.find({
-        where: { customer_id: customerId },
-      });
-      const existingDocTypes = new Set(existingDocs.map((d) => d.doc_type));
-      const incomingDocTypes = new Set(
-        (payload?.documents || []).map((d) => d.doc_type),
-      );
-      const combined = new Set<CustomerDocumentType>([
-        ...existingDocTypes,
-        ...incomingDocTypes,
-      ]);
-      const stillMissing = cfg.requiredDocs.filter((rt) => !combined.has(rt));
-      if (stillMissing.length) {
-        throw new BadRequestException(
-          `Missing required documents: ${stillMissing.join(', ')}`,
-        );
-      }
-    }
+    // 3. Simplified KYC Handling Strategy (KYC & documents now optional)
+    // We no longer duplicate KYC nor documents. Only address continuity is retained.
+    // If client sends KYC payload, we'll create a KYC record (APPROVED if autoApprove else PENDING).
+    // If client sends documents, they will be stored and tied to the newly created KYC (if any) or ignored if no KYC.
+    // No pre-validation of required fields/documents: all optional now.
 
     // 6. Transactional execution to ensure atomicity for all writes
     return this.dataSource.transaction(async (manager) => {
@@ -470,46 +500,12 @@ export class CustomersService {
         return { service: existingInside, status: 'already_active' };
       }
 
-      // (a) KYC creation / duplication
+      // (a) KYC creation (optional)
       let kycRecord: CustomerKyc | null = null;
       const kycRepoTx = manager.getRepository(CustomerKyc);
       const docRepoTx = manager.getRepository(CustomerDocument);
 
-      if (sourceApprovedKyc) {
-        // Duplicate approved KYC (copy selected fields explicitly)
-        kycRecord = kycRepoTx.create({
-          customer_id: customerId,
-          kyc_level: sourceApprovedKyc.kyc_level,
-          status: KycStatus.APPROVED,
-          submitted_at: new Date(),
-          reviewed_at: sourceApprovedKyc.reviewed_at || new Date(),
-          reviewed_by: sourceApprovedKyc.reviewed_by || null,
-          nationality: sourceApprovedKyc.nationality,
-          employment_status: sourceApprovedKyc.employment_status,
-          annual_income: sourceApprovedKyc.annual_income,
-          investment_experience: sourceApprovedKyc.investment_experience,
-          source_of_funds: sourceApprovedKyc.source_of_funds,
-          risk_tolerance: sourceApprovedKyc.risk_tolerance,
-          dob: sourceApprovedKyc.dob,
-        } as Partial<CustomerKyc> as CustomerKyc);
-        kycRecord = await kycRepoTx.save(kycRecord);
-
-        if (duplicateDocuments.length) {
-          const clonedDocs = duplicateDocuments.map((d) =>
-            docRepoTx.create({
-              customer_id: customerId,
-              kyc_id: kycRecord!.id,
-              doc_type: d.doc_type,
-              storage_ref: d.storage_ref,
-              checksum: d.checksum,
-              encrypted: d.encrypted,
-              metadata: d.metadata,
-            }),
-          );
-          await docRepoTx.save(clonedDocs);
-        }
-      } else {
-        // Original behavior: create fresh KYC
+      if (payload?.kyc) {
         if (cfg.autoApprove) {
           kycRecord = kycRepoTx.create({
             customer_id: customerId,
@@ -518,14 +514,14 @@ export class CustomersService {
             submitted_at: new Date(),
             reviewed_at: new Date(),
             reviewed_by: null,
-            ...payload?.kyc, // allow extra optional fields
+            ...payload.kyc,
           });
         } else {
           kycRecord = kycRepoTx.create({
             customer_id: customerId,
             kyc_level: cfg.level,
             status: KycStatus.PENDING,
-            ...payload?.kyc,
+            ...payload.kyc,
             submitted_at: new Date(),
           });
         }
@@ -550,13 +546,12 @@ export class CustomersService {
         await addressRepo.save(primary);
       }
 
-      // (c) Documents (only those provided in this request)
-      if (payload?.documents?.length && !sourceApprovedKyc) {
-        // Only add provided documents if we are NOT duplicating from an approved KYC (avoid duplicates)
+      // (c) Documents (optional; only if provided)
+      if (payload?.documents?.length) {
         const docs: CustomerDocument[] = payload.documents.map((d) =>
           docRepoTx.create({
             customer_id: customerId,
-            kyc_id: kycRecord?.id,
+            kyc_id: kycRecord?.id || null,
             doc_type: d.doc_type,
             storage_ref: d.storage_ref,
             checksum: d.checksum || null,
@@ -568,16 +563,14 @@ export class CustomersService {
       }
 
       // (d) Service activation
-      const requiresManualApproval = kycRecord
-        ? kycRecord.status === KycStatus.PENDING
-        : false;
       const config = this.requiredConfig[serviceType];
+      const hasPendingKyc = kycRecord?.status === KycStatus.PENDING;
 
-      // Determine if service should be active immediately
+      // Determine if service should be active immediately (must meet all: autoApprove OR no admin approval, no payment, no pending KYC)
       const shouldActivateImmediately =
-        !requiresManualApproval &&
         !config.requiresPayment &&
-        !config.requiresAdminApproval;
+        !config.requiresAdminApproval &&
+        !hasPendingKyc;
 
       // Calculate subscription details for subscription-based services
       let subscriptionExpiresAt: Date | null = null;
@@ -613,12 +606,12 @@ export class CustomersService {
 
       // Determine final status
       let finalStatus = 'activated';
-      if (requiresManualApproval) {
-        finalStatus = 'pending_review';
-      } else if (config.requiresPayment) {
+      if (config.requiresPayment) {
         finalStatus = 'pending_payment';
       } else if (config.requiresAdminApproval) {
         finalStatus = 'pending_admin_approval';
+      } else if (hasPendingKyc) {
+        finalStatus = 'pending_review';
       }
 
       return {

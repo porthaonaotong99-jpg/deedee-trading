@@ -36,6 +36,7 @@ export class PermissionsGuard implements CanActivate {
       const userPermissions = await this.usersService.getUserPermissions(
         user.sub,
       );
+      console.log({ userPermissions });
       return requiredPermissions.some((permission) =>
         userPermissions.includes(permission),
       );

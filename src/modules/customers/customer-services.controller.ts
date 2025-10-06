@@ -52,6 +52,7 @@ import { ServiceApproveResponseExamples } from './swagger/service-approve.exampl
 import { Query } from '@nestjs/common';
 import { KycLevel, KycStatus } from './entities/customer-kyc.entity';
 import { CustomerServiceType } from './entities/customer-service.entity';
+import { TopupServiceDto, TransferFundsDto } from './dto/funds.dto';
 
 @ApiTags('customer-services')
 @ApiExtraModels(ApplyServiceDto, ApplyServiceResponseDto)
@@ -155,6 +156,43 @@ export class CustomerServicesController {
         'kyc' in result && result.kyc ? result.kyc.kyc_level : undefined,
     };
     return handleSuccessOne({ data: response, message: 'Service processed' });
+  }
+
+  @UseGuards(JwtCustomerAuthGuard)
+  @Post(':serviceId/topup')
+  @ApiOperation({
+    summary: 'Top up INTERNATIONAL_STOCK_ACCOUNT service balance',
+  })
+  async topup(
+    @Param('serviceId') serviceId: string,
+    @AuthUser() user: JwtPayload,
+    @Body(ValidationPipe) dto: TopupServiceDto,
+  ) {
+    if (user.type !== 'customer') throw new ForbiddenException();
+    const result = await this.customersService.topupInternationalAccount(
+      user.sub,
+      serviceId,
+      dto,
+    );
+    return handleSuccessOne({ data: result, message: 'Top-up successful' });
+  }
+
+  @UseGuards(JwtCustomerAuthGuard)
+  @Post('transfer')
+  @ApiOperation({
+    summary:
+      'Transfer funds from INTERNATIONAL_STOCK_ACCOUNT to GUARANTEED_RETURNS',
+  })
+  async transfer(
+    @AuthUser() user: JwtPayload,
+    @Body(ValidationPipe) dto: TransferFundsDto,
+  ) {
+    if (user.type !== 'customer') throw new ForbiddenException();
+    const result = await this.customersService.transferToGuaranteedReturns(
+      user.sub,
+      dto,
+    );
+    return handleSuccessOne({ data: result, message: 'Transfer processed' });
   }
 
   @UseGuards(JwtUserAuthGuard)

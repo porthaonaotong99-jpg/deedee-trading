@@ -10,6 +10,7 @@ import {
 import { TransferIdentify, TransferStatus } from '../../../common/enums';
 import { Customer } from '../../customers/entities/customer.entity';
 import { User } from '../../users/entities/user.entity';
+import { CustomerService } from '../../customers/entities/customer-service.entity';
 
 @Entity('transfer_history')
 export class TransferHistory {
@@ -28,6 +29,17 @@ export class TransferHistory {
 
   @Column({ type: 'varchar', nullable: true })
   payment_slip: string;
+
+  @Column({
+    type: 'uuid',
+    nullable: true,
+    comment: 'Target service when identify=INVEST',
+  })
+  service_id: string | null;
+
+  @ManyToOne(() => CustomerService, { nullable: true })
+  @JoinColumn({ name: 'service_id' })
+  service?: CustomerService | null;
 
   @Column({
     type: 'enum',

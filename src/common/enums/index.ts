@@ -42,6 +42,7 @@ export enum TransferIdentify {
   CALL_PAYMENT = 'call_payment',
   VIDEO_PAYMENT = 'video_payment',
   CHAT_PAYMENT = 'chat_payment',
+  INVEST = 'invest', // wallet -> service investment allocation
 }
 
 export enum TransferStatus {

@@ -66,6 +66,24 @@ export class CustomerService {
   })
   subscription_fee: number | null;
 
+  @Column({
+    type: 'decimal',
+    precision: 15,
+    scale: 2,
+    default: 0,
+    comment: 'Available balance for this service (top-ups, debits)',
+  })
+  balance: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 15,
+    scale: 2,
+    default: 0,
+    comment: 'Total invested principal for investment-style services',
+  })
+  invested_amount: number;
+
   // KYC record used to approve/activate this service (if any)
   @Column({ type: 'uuid', nullable: true })
   kyc_id: string | null;
