@@ -482,11 +482,17 @@ export class CustomersService {
     const cfg = this.requiredConfig[serviceType];
     if (!cfg) throw new BadRequestException('Unsupported service');
 
-    // 3. Simplified KYC Handling Strategy (KYC & documents now optional)
-    // We no longer duplicate KYC nor documents. Only address continuity is retained.
-    // If client sends KYC payload, we'll create a KYC record (APPROVED if autoApprove else PENDING).
-    // If client sends documents, they will be stored and tied to the newly created KYC (if any) or ignored if no KYC.
-    // No pre-validation of required fields/documents: all optional now.
+    // 3. KYC Handling Strategy
+    // If payload.kyc provided -> create NEW KYC (APPROVED if autoApprove else PENDING)
+    // If NOT provided AND service requires KYC (required fields/docs + admin approval without payment)
+    //    -> duplicate latest APPROVED KYC (meeting or exceeding required level) into a NEW PENDING KYC
+    //       and (if no new documents supplied) clone required (or all) documents.
+    // If NOT provided AND no KYC needed -> skip creating KYC.
+
+    const serviceNeedsKyc =
+      (cfg.requiredFields.length > 0 || cfg.requiredDocs.length > 0) &&
+      cfg.requiresAdminApproval &&
+      !cfg.requiresPayment;
 
     // 6. Transactional execution to ensure atomicity for all writes
     return this.dataSource.transaction(async (manager) => {
@@ -500,12 +506,14 @@ export class CustomersService {
         return { service: existingInside, status: 'already_active' };
       }
 
-      // (a) KYC creation (optional)
+      // (a) KYC creation / duplication (optional)
       let kycRecord: CustomerKyc | null = null;
+      let duplicatedFromKycId: string | null = null;
       const kycRepoTx = manager.getRepository(CustomerKyc);
       const docRepoTx = manager.getRepository(CustomerDocument);
 
       if (payload?.kyc) {
+        // Fresh KYC data provided
         if (cfg.autoApprove) {
           kycRecord = kycRepoTx.create({
             customer_id: customerId,
@@ -521,11 +529,75 @@ export class CustomersService {
             customer_id: customerId,
             kyc_level: cfg.level,
             status: KycStatus.PENDING,
-            ...payload.kyc,
             submitted_at: new Date(),
+            ...payload.kyc,
           });
         }
         kycRecord = await kycRepoTx.save(kycRecord);
+      } else if (serviceNeedsKyc) {
+        // No KYC input but service requires KYC: attempt duplication of prior approved KYC
+        const approvedKycs = await kycRepoTx.find({
+          where: { customer_id: customerId, status: KycStatus.APPROVED },
+          order: { created_at: 'DESC' },
+          take: 5,
+        });
+        const source =
+          approvedKycs.find(
+            (k) =>
+              this.kycLevelOrder(k.kyc_level) >= this.kycLevelOrder(cfg.level),
+          ) || approvedKycs[0];
+
+        if (!source) {
+          throw new BadRequestException(
+            'KYC information required but no existing approved KYC found. Please submit KYC data.',
+          );
+        }
+
+        duplicatedFromKycId = source.id;
+
+        const cloneFields: Partial<CustomerKyc> = {
+          dob: source.dob,
+          nationality: source.nationality,
+          // employment related / financial profile
+          employment_status: source.employment_status,
+          annual_income: source.annual_income,
+          investment_experience: source.investment_experience,
+          source_of_funds: source.source_of_funds,
+          risk_tolerance: source.risk_tolerance,
+        };
+
+        kycRecord = kycRepoTx.create({
+          customer_id: customerId,
+          kyc_level: cfg.level,
+          status: KycStatus.PENDING,
+          submitted_at: new Date(),
+          ...cloneFields,
+        });
+        kycRecord = await kycRepoTx.save(kycRecord);
+
+        // Duplicate documents only if user didn't supply new ones
+        if (!payload?.documents || payload.documents.length === 0) {
+          const srcDocs = await docRepoTx.find({
+            where: { kyc_id: source.id, customer_id: customerId },
+          });
+          const docsToClone = cfg.requiredDocs.length
+            ? srcDocs.filter((d) => cfg.requiredDocs.includes(d.doc_type))
+            : srcDocs;
+          if (docsToClone.length) {
+            const clones = docsToClone.map((d) =>
+              docRepoTx.create({
+                customer_id: customerId,
+                kyc_id: kycRecord!.id,
+                doc_type: d.doc_type,
+                storage_ref: d.storage_ref,
+                checksum: d.checksum,
+                encrypted: d.encrypted,
+                metadata: d.metadata,
+              }),
+            );
+            await docRepoTx.save(clones);
+          }
+        }
       }
 
       // (b) Upsert primary address
@@ -618,6 +690,7 @@ export class CustomersService {
         service: savedService,
         kyc: kycRecord,
         status: finalStatus,
+        duplicated_from_kyc_id: duplicatedFromKycId || undefined,
       };
     });
   }
@@ -936,8 +1009,35 @@ export class CustomersService {
     });
 
     // 5. Shape response
+    // 5. Fetch related customer basic profile data
+    const customerIds = Array.from(
+      new Set(kycRecords.map((k) => k.customer_id)),
+    );
+    let customersById: Record<string, Partial<Customer>> = {};
+    if (customerIds.length) {
+      const customerEntities = await this.repo.find({
+        where: customerIds.map((id) => ({ id })),
+        select: [
+          'id',
+          'username',
+          'email',
+          'first_name',
+          'last_name',
+          'status',
+          'created_at',
+        ],
+      });
+      customersById = customerEntities.reduce<
+        Record<string, Partial<Customer>>
+      >((acc, c) => {
+        acc[c.id] = c;
+        return acc;
+      }, {});
+    }
+
     const enriched = kycRecords.map((k) => ({
       ...k,
+      customer: customersById[k.customer_id] || null,
       services: (servicesByKyc[k.id] || []).map((s) => ({
         id: s.id,
         service_type: s.service_type,
