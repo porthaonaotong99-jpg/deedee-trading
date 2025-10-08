@@ -19,20 +19,30 @@ export class InvestmentInfo {
   @Column({ type: 'varchar', nullable: true })
   name: string;
 
-  @Column({ type: 'float', nullable: true })
-  amount: number;
+  @Column({
+    type: 'numeric',
+    precision: 18,
+    scale: 2,
+    nullable: false,
+    comment: 'Requested investment amount',
+  })
+  requested_amount: string;
 
-  @Column({ type: 'float', nullable: true })
-  profit: number;
+  @Column({
+    type: 'numeric',
+    precision: 8,
+    scale: 6,
+    nullable: true,
+    comment: 'Annual interest rate (e.g., 0.120000 for 12%)',
+  })
+  interest_rate: string;
 
-  @Column({ type: 'float', nullable: true })
-  interest_rate: number;
-
-  @Column({ type: 'float', nullable: true })
-  total: number;
-
-  @Column({ type: 'int', nullable: true })
-  period: number;
+  @Column({
+    type: 'int',
+    nullable: true,
+    comment: 'Investment term in months',
+  })
+  term_months: number;
 
   @Column({ type: 'enum', enum: RiskTolerance, nullable: true })
   risk_tolerance: RiskTolerance;
@@ -51,6 +61,9 @@ export class InvestmentInfo {
 
   @Column({ type: 'varchar', nullable: true })
   payment_type: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  rejection_reason: string;
 
   // Relations / Foreign Keys (nullable initially until data backfilled)
   @Column({ type: 'uuid', nullable: true })

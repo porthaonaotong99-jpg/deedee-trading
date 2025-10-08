@@ -6,6 +6,14 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { InvestmentInfo } from './entities/investment-info.entity';
+import {
+  InvestmentReturns,
+  InvestmentReturnsStatus,
+} from './entities/investment-returns.entity';
+import {
+  InvestmentLedger,
+  InvestmentLedgerType,
+} from './entities/investment-ledger.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { TransferHistory } from '../transfer-history/entities/transfer-history.entity';
 import { CustomerService } from '../customers/entities/customer-service.entity';
@@ -28,6 +36,10 @@ export class InvestmentInfoService {
   constructor(
     @InjectRepository(InvestmentInfo)
     private readonly repo: Repository<InvestmentInfo>,
+    @InjectRepository(InvestmentReturns)
+    private readonly investmentReturnsRepo: Repository<InvestmentReturns>,
+    @InjectRepository(InvestmentLedger)
+    private readonly investmentLedgerRepo: Repository<InvestmentLedger>,
     @InjectRepository(Wallet)
     private readonly walletRepo: Repository<Wallet>,
     @InjectRepository(TransferHistory)
@@ -41,8 +53,8 @@ export class InvestmentInfoService {
     if (dto.amount <= 0) throw new BadRequestException('Amount must be > 0');
     const entity = this.repo.create({
       name: 'guaranteed_returns_investment',
-      amount: dto.amount,
-      interest_rate: dto.interest_rate ?? null,
+      requested_amount: dto.amount.toString(),
+      interest_rate: dto.interest_rate?.toString() ?? null,
       period: dto.period ?? null,
       noted: dto.noted ?? null,
       status: InvestmentInfoStatus.PENDING,
@@ -97,10 +109,12 @@ export class InvestmentInfoService {
     };
   }
 
-  async approve(id: string, adminId: string, profit?: number) {
+  async approve(id: string, adminId: string) {
     // Use explicit transaction for consistency and concurrency safety
     return this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(InvestmentInfo);
+      const investmentReturnsRepo = manager.getRepository(InvestmentReturns);
+      const investmentLedgerRepo = manager.getRepository(InvestmentLedger);
       const walletRepo = manager.getRepository(Wallet);
       const transferRepo = manager.getRepository(TransferHistory);
       const customerServiceRepo = manager.getRepository(CustomerService);
@@ -120,7 +134,7 @@ export class InvestmentInfoService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!wallet) throw new NotFoundException('Wallet not found for customer');
-      if (Number(wallet.total_cash) < Number(entity.amount)) {
+      if (Number(wallet.total_cash) < Number(entity.requested_amount)) {
         throw new BadRequestException('Insufficient wallet balance');
       }
       const service = await customerServiceRepo.findOne({
@@ -139,21 +153,52 @@ export class InvestmentInfoService {
           service_id: entity.service_id,
           identify: TransferIdentify.INVEST,
           status: TransferStatus.PENDING,
-          amount: entity.amount,
+          amount: Number(entity.requested_amount),
         },
         lock: { mode: 'pessimistic_write' },
       });
       if (!transfer)
         throw new NotFoundException('Matching pending transfer not found');
 
+      // Create InvestmentReturns record for position tracking
+      const investmentReturns = investmentReturnsRepo.create({
+        investment_info_id: entity.id,
+        customer_id: entity.customer_id,
+        service_id: entity.service_id,
+        principal_committed: entity.requested_amount,
+        principal_outstanding: entity.requested_amount,
+        return_accrued: '0.00',
+        return_outstanding: '0.00',
+        return_paid: '0.00',
+        status: InvestmentReturnsStatus.INVESTING,
+        start_at: new Date(),
+      });
+      await investmentReturnsRepo.save(investmentReturns);
+
+      // Write FUND entry to InvestmentLedger for audit trail
+      const ledgerEntry = investmentLedgerRepo.create({
+        investment_returns_id: investmentReturns.id,
+        customer_id: entity.customer_id,
+        type: InvestmentLedgerType.FUND,
+        amount: entity.requested_amount,
+        effective_at: new Date(),
+        metadata: {
+          investment_info_id: entity.id,
+          approved_by: adminId,
+          original_transfer_id: transfer.id,
+        },
+        created_by: adminId,
+      });
+      await investmentLedgerRepo.save(ledgerEntry);
+
       // Adjust balances
-      wallet.total_cash = Number(wallet.total_cash) - Number(entity.amount);
+      wallet.total_cash =
+        Number(wallet.total_cash) - Number(entity.requested_amount);
       service.invested_amount =
-        Number(service.invested_amount) + Number(entity.amount);
+        Number(service.invested_amount) + Number(entity.requested_amount);
 
       // Update statuses & audit fields
       entity.status = InvestmentInfoStatus.INVESTING;
-      if (profit != null) entity.profit = profit;
       entity.approved_by = adminId;
       entity.approved_at = new Date();
       transfer.status = TransferStatus.APPROVED;
@@ -185,7 +230,7 @@ export class InvestmentInfoService {
             service_id: entity.service_id,
             identify: TransferIdentify.INVEST,
             status: TransferStatus.PENDING,
-            amount: entity.amount,
+            amount: Number(entity.requested_amount),
           },
           lock: { mode: 'pessimistic_write' },
         });

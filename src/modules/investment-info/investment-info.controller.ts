@@ -165,7 +165,7 @@ export class InvestmentInfoController {
     if (!user || user.type !== 'user') {
       throw new ForbiddenException('Only admins can approve investments');
     }
-    return this.service.approve(id, user.sub, body.profit);
+    return this.service.approve(id, user.sub);
   }
 
   @Post(':id/reject')

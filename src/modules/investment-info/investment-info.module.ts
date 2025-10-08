@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InvestmentInfo } from './entities/investment-info.entity';
+import { InvestmentReturns } from './entities/investment-returns.entity';
+import { InvestmentLedger } from './entities/investment-ledger.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { TransferHistory } from '../transfer-history/entities/transfer-history.entity';
 import { CustomerService } from '../customers/entities/customer-service.entity';
@@ -11,6 +13,8 @@ import { InvestmentInfoController } from './investment-info.controller';
   imports: [
     TypeOrmModule.forFeature([
       InvestmentInfo,
+      InvestmentReturns,
+      InvestmentLedger,
       Wallet,
       TransferHistory,
       CustomerService,
