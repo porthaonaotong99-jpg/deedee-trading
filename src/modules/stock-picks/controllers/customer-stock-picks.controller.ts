@@ -78,6 +78,13 @@ export class CustomerStockPicksController {
       limit: filterDto.limit,
       // Only show active picks for customers
       is_active: true,
+      // New filters for customer browsing
+      risk_level: filterDto.risk_level,
+      sector: filterDto.sector,
+      min_expected_return_percent: filterDto.min_expected_return_percent,
+      max_expected_return_percent: filterDto.max_expected_return_percent,
+      min_time_horizon_months: filterDto.min_time_horizon_months,
+      max_time_horizon_months: filterDto.max_time_horizon_months,
       // No availability filtering - customers see all availability statuses (available, taken, expired)
       // No status filtering - customers see all statuses
     };

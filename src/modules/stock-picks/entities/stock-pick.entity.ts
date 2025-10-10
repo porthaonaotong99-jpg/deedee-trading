@@ -22,6 +22,18 @@ export enum StockPickAvailability {
   EXPIRED = 'expired',
 }
 
+export enum StockPickRiskLevel {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+}
+
+export enum StockPickTierLabel {
+  BUDGET = 'budget',
+  PREMIUM = 'premium',
+  ELITE = 'elite',
+}
+
 @Entity('stock_picks')
 export class StockPick {
   @PrimaryGeneratedColumn('uuid')
@@ -61,6 +73,91 @@ export class StockPick {
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   current_price: number | null;
+
+  // New fields to support customer card UI and purchase price
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    default: 0,
+    comment: 'Sale price customers pay to view the full analysis',
+  })
+  sale_price: number;
+
+  @Column({ type: 'enum', enum: StockPickRiskLevel, nullable: true })
+  risk_level: StockPickRiskLevel | null;
+
+  @Column({
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+    comment: 'Expected minimum return percentage (0-100)',
+  })
+  expected_return_min_percent: number | null;
+
+  @Column({
+    type: 'decimal',
+    precision: 5,
+    scale: 2,
+    nullable: true,
+    comment: 'Expected maximum return percentage (0-100)',
+  })
+  expected_return_max_percent: number | null;
+
+  @Column({
+    type: 'int',
+    nullable: true,
+    comment: 'Minimum expected holding period in months',
+  })
+  time_horizon_min_months: number | null;
+
+  @Column({
+    type: 'int',
+    nullable: true,
+    comment: 'Maximum expected holding period in months',
+  })
+  time_horizon_max_months: number | null;
+
+  @Column({
+    type: 'varchar',
+    length: 50,
+    nullable: true,
+    comment: 'Sector/industry name',
+  })
+  sector: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+    comment: 'Analyst display name',
+  })
+  analyst_name: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: StockPickTierLabel,
+    nullable: true,
+    comment: 'Badge label (budget/premium/elite)',
+  })
+  tier_label: StockPickTierLabel | null;
+
+  @Column({
+    type: 'text',
+    array: true,
+    default: () => 'array[]::text[]',
+    nullable: true,
+    comment: 'Key investment bullet points',
+  })
+  key_points: string[] | null;
+
+  @Column({
+    type: 'boolean',
+    default: true,
+    comment: 'Whether the analysis can be delivered via email',
+  })
+  email_delivery: boolean;
 
   @Column({ type: 'timestamp', nullable: true })
   expires_at: Date | null;

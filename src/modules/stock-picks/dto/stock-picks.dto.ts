@@ -16,6 +16,8 @@ import { Transform } from 'class-transformer';
 import {
   StockPickStatus,
   StockPickAvailability,
+  StockPickRiskLevel,
+  StockPickTierLabel,
 } from '../entities/stock-pick.entity';
 import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
 import { CustomerPickStatus } from '../entities/customer-stock-pick.entity';
@@ -92,6 +94,109 @@ export class CreateStockPickDto {
   @Min(0)
   current_price?: number;
 
+  @ApiProperty({
+    description: 'Sale price customers pay to view analysis',
+    example: 99.99,
+    minimum: 0,
+  })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  sale_price: number;
+
+  @ApiPropertyOptional({ description: 'Risk level', enum: StockPickRiskLevel })
+  @IsOptional()
+  @IsEnum(StockPickRiskLevel)
+  risk_level?: StockPickRiskLevel;
+
+  @ApiPropertyOptional({
+    description: 'Expected minimum return percentage (0-100)',
+    example: 15,
+    minimum: 0,
+    maximum: 100,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  expected_return_min_percent?: number;
+
+  @ApiPropertyOptional({
+    description: 'Expected maximum return percentage (0-100)',
+    example: 35,
+    minimum: 0,
+    maximum: 100,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  expected_return_max_percent?: number;
+
+  @ApiPropertyOptional({
+    description: 'Minimum expected holding period in months',
+    example: 2,
+    minimum: 1,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  time_horizon_min_months?: number;
+
+  @ApiPropertyOptional({
+    description: 'Maximum expected holding period in months',
+    example: 6,
+    minimum: 1,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  time_horizon_max_months?: number;
+
+  @ApiPropertyOptional({
+    description: 'Sector/industry name',
+    example: 'Technology',
+    maxLength: 50,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  sector?: string;
+
+  @ApiPropertyOptional({
+    description: 'Analyst display name',
+    example: 'Sarah Chen',
+    maxLength: 100,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  analyst_name?: string;
+
+  @ApiPropertyOptional({
+    description: 'Tier label/badge',
+    enum: StockPickTierLabel,
+  })
+  @IsOptional()
+  @IsEnum(StockPickTierLabel)
+  tier_label?: StockPickTierLabel;
+
+  @ApiPropertyOptional({
+    description: 'Key investment bullet points',
+    isArray: true,
+    type: String,
+    example: ['Strong cash flows', 'New product launches'],
+  })
+  @IsOptional()
+  key_points?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Whether analysis can be delivered via email',
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  email_delivery?: boolean;
+
   @ApiPropertyOptional({
     description: 'When this pick expires (ISO date string)',
     example: '2025-12-31T23:59:59Z',
@@ -155,6 +260,87 @@ export class UpdateStockPickDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   current_price?: number;
+
+  @ApiPropertyOptional({ description: 'Updated sale price', minimum: 0 })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  sale_price?: number;
+
+  @ApiPropertyOptional({
+    description: 'Updated risk level',
+    enum: StockPickRiskLevel,
+  })
+  @IsOptional()
+  @IsEnum(StockPickRiskLevel)
+  risk_level?: StockPickRiskLevel;
+
+  @ApiPropertyOptional({
+    description: 'Updated expected min return %',
+    minimum: 0,
+    maximum: 100,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  expected_return_min_percent?: number;
+
+  @ApiPropertyOptional({
+    description: 'Updated expected max return %',
+    minimum: 0,
+    maximum: 100,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  expected_return_max_percent?: number;
+
+  @ApiPropertyOptional({ description: 'Updated min holding months' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  time_horizon_min_months?: number;
+
+  @ApiPropertyOptional({ description: 'Updated max holding months' })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  time_horizon_max_months?: number;
+
+  @ApiPropertyOptional({ description: 'Updated sector', maxLength: 50 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  sector?: string;
+
+  @ApiPropertyOptional({ description: 'Updated analyst name', maxLength: 100 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  analyst_name?: string;
+
+  @ApiPropertyOptional({
+    description: 'Updated tier label',
+    enum: StockPickTierLabel,
+  })
+  @IsOptional()
+  @IsEnum(StockPickTierLabel)
+  tier_label?: StockPickTierLabel;
+
+  @ApiPropertyOptional({
+    description: 'Updated key points',
+    isArray: true,
+    type: String,
+  })
+  @IsOptional()
+  key_points?: string[];
+
+  @ApiPropertyOptional({ description: 'Updated email delivery flag' })
+  @IsOptional()
+  @IsBoolean()
+  email_delivery?: boolean;
 
   @ApiPropertyOptional({
     description: 'Updated expiration date',
@@ -314,6 +500,64 @@ export class StockPickFilterDto {
     return value as number | undefined;
   })
   limit?: number;
+
+  // Additional optional filters used by customer route and (optionally) admin
+  @ApiPropertyOptional({
+    description: 'Filter by risk level',
+    enum: StockPickRiskLevel,
+  })
+  @IsOptional()
+  @IsEnum(StockPickRiskLevel)
+  risk_level?: StockPickRiskLevel;
+
+  @ApiPropertyOptional({
+    description: 'Filter by sector/category',
+    maxLength: 50,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  sector?: string;
+
+  @ApiPropertyOptional({
+    description: 'Min expected return % (overlap)',
+    minimum: 0,
+    maximum: 100,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  min_expected_return_percent?: number;
+
+  @ApiPropertyOptional({
+    description: 'Max expected return % (overlap)',
+    minimum: 0,
+    maximum: 100,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  max_expected_return_percent?: number;
+
+  @ApiPropertyOptional({
+    description: 'Min time horizon months (overlap)',
+    minimum: 1,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  min_time_horizon_months?: number;
+
+  @ApiPropertyOptional({
+    description: 'Max time horizon months (overlap)',
+    minimum: 1,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  max_time_horizon_months?: number;
 }
 
 // Customer-specific filter DTO (minimal filters - pagination only)
@@ -354,6 +598,63 @@ export class CustomerStockPickFilterDto {
     return value as number | undefined;
   })
   limit?: number;
+
+  @ApiPropertyOptional({
+    description: 'Filter by risk level',
+    enum: StockPickRiskLevel,
+  })
+  @IsOptional()
+  @IsEnum(StockPickRiskLevel)
+  risk_level?: StockPickRiskLevel;
+
+  @ApiPropertyOptional({
+    description: 'Filter by sector/category',
+    maxLength: 50,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  sector?: string;
+
+  @ApiPropertyOptional({
+    description: 'Min expected return % (overlap)',
+    minimum: 0,
+    maximum: 100,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  min_expected_return_percent?: number;
+
+  @ApiPropertyOptional({
+    description: 'Max expected return % (overlap)',
+    minimum: 0,
+    maximum: 100,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  max_expected_return_percent?: number;
+
+  @ApiPropertyOptional({
+    description: 'Min time horizon months (overlap)',
+    minimum: 1,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  min_time_horizon_months?: number;
+
+  @ApiPropertyOptional({
+    description: 'Max time horizon months (overlap)',
+    minimum: 1,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  max_time_horizon_months?: number;
 }
 
 // Response DTOs
@@ -387,6 +688,43 @@ export class StockPickResponseDto {
 
   @ApiPropertyOptional({ description: 'Current price' })
   current_price?: number;
+
+  @ApiProperty({ description: 'Sale price for customers' })
+  sale_price: number;
+
+  @ApiPropertyOptional({ description: 'Risk level', enum: StockPickRiskLevel })
+  risk_level?: StockPickRiskLevel;
+
+  @ApiPropertyOptional({ description: 'Expected min return %' })
+  expected_return_min_percent?: number;
+
+  @ApiPropertyOptional({ description: 'Expected max return %' })
+  expected_return_max_percent?: number;
+
+  @ApiPropertyOptional({ description: 'Min holding months' })
+  time_horizon_min_months?: number;
+
+  @ApiPropertyOptional({ description: 'Max holding months' })
+  time_horizon_max_months?: number;
+
+  @ApiPropertyOptional({ description: 'Sector/industry' })
+  sector?: string;
+
+  @ApiPropertyOptional({ description: 'Analyst display name' })
+  analyst_name?: string;
+
+  @ApiPropertyOptional({ description: 'Tier label', enum: StockPickTierLabel })
+  tier_label?: StockPickTierLabel;
+
+  @ApiPropertyOptional({
+    description: 'Key investment points',
+    isArray: true,
+    type: String,
+  })
+  key_points?: string[];
+
+  @ApiPropertyOptional({ description: 'Whether available via email' })
+  email_delivery?: boolean;
 
   @ApiPropertyOptional({ description: 'Expiration date' })
   expires_at?: Date;
@@ -476,6 +814,43 @@ export class CustomerViewStockPickDto {
 
   @ApiPropertyOptional({ description: 'Current price' })
   current_price?: number;
+
+  @ApiProperty({ description: 'Sale price for customers' })
+  sale_price: number;
+
+  @ApiPropertyOptional({ description: 'Risk level', enum: StockPickRiskLevel })
+  risk_level?: StockPickRiskLevel;
+
+  @ApiPropertyOptional({ description: 'Expected min return %' })
+  expected_return_min_percent?: number;
+
+  @ApiPropertyOptional({ description: 'Expected max return %' })
+  expected_return_max_percent?: number;
+
+  @ApiPropertyOptional({ description: 'Min holding months' })
+  time_horizon_min_months?: number;
+
+  @ApiPropertyOptional({ description: 'Max holding months' })
+  time_horizon_max_months?: number;
+
+  @ApiPropertyOptional({ description: 'Sector/industry' })
+  sector?: string;
+
+  @ApiPropertyOptional({ description: 'Analyst display name' })
+  analyst_name?: string;
+
+  @ApiPropertyOptional({ description: 'Tier label', enum: StockPickTierLabel })
+  tier_label?: StockPickTierLabel;
+
+  @ApiPropertyOptional({
+    description: 'Key investment points',
+    isArray: true,
+    type: String,
+  })
+  key_points?: string[];
+
+  @ApiPropertyOptional({ description: 'Email delivery supported' })
+  email_delivery?: boolean;
 
   @ApiPropertyOptional({ description: 'Expiration date' })
   expires_at?: Date;

@@ -184,7 +184,46 @@ export class StockPicksService {
       { now: new Date() },
     );
 
-    // No additional filters for customers - they see all statuses
+    // Apply optional customer filters (risk, sector, expected return range, time horizon)
+    if (filterDto.risk_level) {
+      queryBuilder.andWhere('pick.risk_level = :riskLevel', {
+        riskLevel: filterDto.risk_level,
+      });
+    }
+    if (filterDto.sector) {
+      queryBuilder.andWhere('LOWER(pick.sector) = LOWER(:sector)', {
+        sector: filterDto.sector,
+      });
+    }
+    // Percent overlap logic: ranges overlap if minA <= maxB AND maxA >= minB
+    if (
+      filterDto.min_expected_return_percent !== undefined ||
+      filterDto.max_expected_return_percent !== undefined
+    ) {
+      const minPct =
+        filterDto.min_expected_return_percent ?? Number.NEGATIVE_INFINITY;
+      const maxPct =
+        filterDto.max_expected_return_percent ?? Number.POSITIVE_INFINITY;
+      // Only apply when we have at least one bound
+      queryBuilder.andWhere(
+        '((pick.expected_return_min_percent IS NULL AND pick.expected_return_max_percent IS NULL) OR (pick.expected_return_min_percent <= :maxPct AND pick.expected_return_max_percent >= :minPct))',
+        { minPct, maxPct },
+      );
+    }
+    // Time horizon overlap logic similar to percent
+    if (
+      filterDto.min_time_horizon_months !== undefined ||
+      filterDto.max_time_horizon_months !== undefined
+    ) {
+      const minMonths =
+        filterDto.min_time_horizon_months ?? Number.NEGATIVE_INFINITY;
+      const maxMonths =
+        filterDto.max_time_horizon_months ?? Number.POSITIVE_INFINITY;
+      queryBuilder.andWhere(
+        '((pick.time_horizon_min_months IS NULL AND pick.time_horizon_max_months IS NULL) OR (pick.time_horizon_min_months <= :maxMonths AND pick.time_horizon_max_months >= :minMonths))',
+        { minMonths, maxMonths },
+      );
+    }
 
     queryBuilder.orderBy('pick.created_at', 'DESC').skip(skip).take(limit);
 
@@ -437,6 +476,7 @@ export class StockPicksService {
           <h3>Stock Details:</h3>
           <p><strong>Symbol:</strong> ${customerPick.stock_pick.stock_symbol}</p>
           <p><strong>Description:</strong> ${customerPick.stock_pick.description}</p>
+          ${customerPick.stock_pick.sale_price ? `<p><strong>Sale Price:</strong> $${customerPick.stock_pick.sale_price}</p>` : ''}
           ${customerPick.stock_pick.target_price ? `<p><strong>Target Price:</strong> $${customerPick.stock_pick.target_price}</p>` : ''}
           ${customerPick.stock_pick.current_price ? `<p><strong>Current Price:</strong> $${customerPick.stock_pick.current_price}</p>` : ''}
         </div>
@@ -504,6 +544,19 @@ export class StockPicksService {
       admin_notes: stockPick.admin_notes ?? undefined,
       target_price: stockPick.target_price ?? undefined,
       current_price: stockPick.current_price ?? undefined,
+      sale_price: stockPick.sale_price,
+      risk_level: stockPick.risk_level ?? undefined,
+      expected_return_min_percent:
+        stockPick.expected_return_min_percent ?? undefined,
+      expected_return_max_percent:
+        stockPick.expected_return_max_percent ?? undefined,
+      time_horizon_min_months: stockPick.time_horizon_min_months ?? undefined,
+      time_horizon_max_months: stockPick.time_horizon_max_months ?? undefined,
+      sector: stockPick.sector ?? undefined,
+      analyst_name: stockPick.analyst_name ?? undefined,
+      tier_label: stockPick.tier_label ?? undefined,
+      key_points: stockPick.key_points ?? undefined,
+      email_delivery: stockPick.email_delivery ?? undefined,
       expires_at: stockPick.expires_at ?? undefined,
       is_active: stockPick.is_active,
       created_at: stockPick.created_at,
@@ -522,6 +575,19 @@ export class StockPicksService {
       service_type: stockPick.service_type,
       target_price: stockPick.target_price ?? undefined,
       current_price: stockPick.current_price ?? undefined,
+      sale_price: stockPick.sale_price,
+      risk_level: stockPick.risk_level ?? undefined,
+      expected_return_min_percent:
+        stockPick.expected_return_min_percent ?? undefined,
+      expected_return_max_percent:
+        stockPick.expected_return_max_percent ?? undefined,
+      time_horizon_min_months: stockPick.time_horizon_min_months ?? undefined,
+      time_horizon_max_months: stockPick.time_horizon_max_months ?? undefined,
+      sector: stockPick.sector ?? undefined,
+      analyst_name: stockPick.analyst_name ?? undefined,
+      tier_label: stockPick.tier_label ?? undefined,
+      key_points: stockPick.key_points ?? undefined,
+      email_delivery: stockPick.email_delivery ?? undefined,
       expires_at: stockPick.expires_at ?? undefined,
       created_at: stockPick.created_at,
       is_selected: isSelected,
