@@ -47,7 +47,6 @@ export class WalletsController {
   @Get('me')
   @ApiOperation({ summary: 'Get my wallet (customer authenticated)' })
   async getMyWallet(@AuthUser() user: JwtPayload) {
-    console.log({ user });
     if (!user || user.type !== 'customer') {
       return handleSuccessOne({
         data: null,

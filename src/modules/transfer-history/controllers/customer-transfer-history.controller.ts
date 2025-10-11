@@ -36,6 +36,19 @@ export class CustomerTransferHistoryController {
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @ApiQuery({
+    name: 'sort',
+    required: false,
+    description: 'Sort field',
+    example: 'created_at',
+  })
+  @ApiQuery({
+    name: 'order',
+    required: false,
+    description: 'Sort order',
+    enum: ['ASC', 'DESC'],
+    example: 'DESC',
+  })
+  @ApiQuery({
     name: 'start_date',
     required: false,
     description:
@@ -52,7 +65,11 @@ export class CustomerTransferHistoryController {
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
   ) {
-    if (user.type !== 'customer') throw new ForbiddenException();
+    console.log({ user });
+    if (user.type !== 'customer')
+      throw new ForbiddenException(
+        'Only customers can access their transfer history',
+      );
 
     let parsedStart = start_date ? new Date(start_date) : undefined;
     let parsedEnd = end_date ? new Date(end_date) : undefined;
@@ -81,7 +98,11 @@ export class CustomerTransferHistoryController {
     @Param('id', ParseUUIDPipe) id: string,
     @AuthUser() user: JwtPayload,
   ) {
-    if (user.type !== 'customer') throw new ForbiddenException();
+    console.log({ user });
+    if (user.type !== 'customer')
+      throw new ForbiddenException(
+        'Only customers can access their transfer history',
+      );
     const data = await this.service.findOneForCustomer(id, user.sub);
     return handleSuccessOne({ data, message: 'Transfer found' });
   }
