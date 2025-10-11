@@ -9,6 +9,7 @@ import {
 } from 'typeorm';
 import { Customer } from '../../customers/entities/customer.entity';
 import { CustomerService } from '../../customers/entities/customer-service.entity';
+import { SubscriptionPackage } from '../../subscription-packages/entities/subscription-package.entity';
 
 export enum PaymentMethod {
   CREDIT_CARD = 'credit_card',
@@ -109,6 +110,14 @@ export class Payment {
   // Link to subscription package (if applicable)
   @Column({ type: 'uuid', nullable: true })
   subscription_package_id: string | null;
+
+  @ManyToOne(() => SubscriptionPackage, { nullable: true })
+  @JoinColumn({ name: 'subscription_package_id' })
+  subscription_package: SubscriptionPackage | null;
+
+  // Store the resulting subscription expiration at approval time (if applicable)
+  @Column({ type: 'timestamp', nullable: true })
+  subscription_expires_at: Date | null;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   refunded_amount: number;

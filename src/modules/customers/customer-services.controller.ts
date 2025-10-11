@@ -54,7 +54,8 @@ import { ServiceApproveResponseExamples } from './swagger/service-approve.exampl
 import { Query } from '@nestjs/common';
 import { KycLevel, KycStatus } from './entities/customer-kyc.entity';
 import { CustomerServiceType } from './entities/customer-service.entity';
-import { TopupServiceDto, TransferFundsDto } from './dto/funds.dto';
+import { TopupServiceDto } from './dto/funds.dto';
+import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
 
 @ApiTags('customer-services')
 @ApiExtraModels(ApplyServiceDto, ApplyServiceResponseDto)
@@ -177,24 +178,6 @@ export class CustomerServicesController {
       dto,
     );
     return handleSuccessOne({ data: result, message: 'Top-up successful' });
-  }
-
-  @UseGuards(JwtCustomerAuthGuard)
-  @Post('transfer')
-  @ApiOperation({
-    summary:
-      'Transfer funds from INTERNATIONAL_STOCK_ACCOUNT to GUARANTEED_RETURNS',
-  })
-  async transfer(
-    @AuthUser() user: JwtPayload,
-    @Body(ValidationPipe) dto: TransferFundsDto,
-  ) {
-    if (user.type !== 'customer') throw new ForbiddenException();
-    const result = await this.customersService.transferToGuaranteedReturns(
-      user.sub,
-      dto,
-    );
-    return handleSuccessOne({ data: result, message: 'Transfer processed' });
   }
 
   @UseGuards(JwtUserAuthGuard)
@@ -638,8 +621,73 @@ export class CustomerServicesController {
       endDate: parsedEnd,
     });
     const totalPages = Math.ceil(res.total / effectiveLimit) || 1;
+    const formatDate = (d?: Date | null) =>
+      d
+        ? new Date(d).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          })
+        : null;
+    const formatMoney = (amount: number, currency = 'USD') =>
+      new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    const statusLabel = (status: PaymentStatus): string => {
+      switch (status) {
+        case PaymentStatus.SUCCEEDED:
+          return 'Active';
+        case PaymentStatus.PENDING:
+        case PaymentStatus.PAYMENT_SLIP_SUBMITTED:
+        case PaymentStatus.PROCESSING:
+          return 'Pending';
+        case PaymentStatus.REFUNDED:
+          return 'Refunded';
+        case PaymentStatus.PARTIALLY_REFUNDED:
+          return 'Partially Refunded';
+        case PaymentStatus.CANCELED:
+          return 'Canceled';
+        case PaymentStatus.FAILED:
+          return 'Failed';
+        default:
+          return 'Unknown';
+      }
+    };
+    const data = res.payments.map((p: Payment) => {
+      const pkg = p.subscription_package;
+      const planFromDescription = pkg?.description || undefined;
+      const fallbackPlan = (() => {
+        const label =
+          pkg?.service_type === CustomerServiceType.PREMIUM_MEMBERSHIP
+            ? 'Premium'
+            : 'Subscription';
+        const months = pkg?.duration_months
+          ? `${pkg.duration_months} Months`
+          : '';
+        return `${label}${months ? ' - ' + months : ''}`;
+      })();
+      const currency = pkg?.currency || 'USD';
+      const rawPrice = pkg?.price as unknown;
+      const priceNum = Number(
+        typeof rawPrice === 'string' || typeof rawPrice === 'number'
+          ? rawPrice
+          : 0,
+      );
+      return {
+        id: p.id,
+        date: formatDate(p.approved_at) || formatDate(p.created_at),
+        plan: planFromDescription || fallbackPlan,
+        amount: formatMoney(priceNum, currency),
+        currency,
+        status: statusLabel(p.status),
+        expiryDate: formatDate(p.subscription_expires_at),
+      };
+    });
     return handleSuccessPaginated({
-      data: res.payments,
+      data,
       total: res.total,
       page: parsedPage,
       limit: effectiveLimit,

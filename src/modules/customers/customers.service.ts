@@ -1918,15 +1918,6 @@ export class CustomersService {
 
         const now = new Date();
 
-        // Approve payment and activate service
-        await paymentRepo.update(payment.id, {
-          status: PaymentStatus.SUCCEEDED,
-          approved_by_admin_id: adminUserId,
-          approved_at: now,
-          admin_notes: adminNotes,
-          paid_at: now,
-        });
-
         // Ensure subscription expiration & fee are set, and extend on subsequent approvals
         const service = payment.service;
         const base =
@@ -1940,6 +1931,17 @@ export class CustomersService {
           exp.setMonth(exp.getMonth() + service.subscription_duration);
           subscriptionExpiresAt = exp;
         }
+
+        // Approve payment and set resulting subscription expiration on the payment record
+        await paymentRepo.update(payment.id, {
+          status: PaymentStatus.SUCCEEDED,
+          approved_by_admin_id: adminUserId,
+          approved_at: now,
+          admin_notes: adminNotes,
+          paid_at: now,
+          subscription_expires_at: subscriptionExpiresAt ?? null,
+          // subscription_package_id is typically set during application; preserve if present
+        });
 
         await serviceRepo.update(service.id, {
           active: true,

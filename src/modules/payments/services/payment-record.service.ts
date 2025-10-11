@@ -250,6 +250,7 @@ export class PaymentRecordService {
     const qb = this.paymentRepo
       .createQueryBuilder('payment')
       .leftJoinAndSelect('payment.service', 'service')
+      .leftJoinAndSelect('payment.subscription_package', 'subscription_package')
       .where('payment.customer_id = :customerId', { customerId });
 
     if (options?.status) {
