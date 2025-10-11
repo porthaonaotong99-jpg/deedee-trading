@@ -15,7 +15,6 @@ import {
 import { TransferHistoryService } from './transfer-history.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { Permissions } from '../../common/decorators/permissions.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
   handleSuccessPaginated,
@@ -30,7 +29,6 @@ export class TransferHistoryController {
   constructor(private readonly service: TransferHistoryService) {}
 
   @Get()
-  @Permissions('transfer-history:read')
   @ApiOperation({ summary: 'List transfers (paginated)' })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
@@ -47,7 +45,6 @@ export class TransferHistoryController {
   }
 
   @Get(':id')
-  @Permissions('transfer-history:read')
   @ApiOperation({ summary: 'Get transfer by id' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.service.findOne(id);

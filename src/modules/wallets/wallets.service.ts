@@ -122,6 +122,8 @@ export class WalletsService {
     });
     if (!wallet) throw new NotFoundException('Wallet not found');
     wallet.total_cash = Number(wallet.total_cash) + Number(transfer.amount);
+    wallet.total_balance =
+      Number(wallet.total_balance) + Number(transfer.amount);
     wallet.total_recharge =
       Number(wallet.total_recharge) + Number(transfer.amount);
     transfer.status = TransferStatus.APPROVED;

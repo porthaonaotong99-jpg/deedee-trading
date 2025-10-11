@@ -1,12 +1,16 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { TransferHistoryController } from './transfer-history.controller';
+import { AdminTransferHistoryController } from './controllers/admin-transfer-history.controller';
+import { CustomerTransferHistoryController } from './controllers/customer-transfer-history.controller';
 import { TransferHistoryService } from './transfer-history.service';
 import { TransferHistory } from './entities/transfer-history.entity';
 
 @Module({
   imports: [TypeOrmModule.forFeature([TransferHistory])],
-  controllers: [TransferHistoryController],
+  controllers: [
+    AdminTransferHistoryController,
+    CustomerTransferHistoryController,
+  ],
   providers: [TransferHistoryService],
   exports: [TransferHistoryService],
 })
