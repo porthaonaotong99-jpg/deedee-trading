@@ -117,10 +117,16 @@ export class SubscriptionPackagesController {
       });
     }
 
-    return handleSuccessMany({
+    const base = handleSuccessMany({
       data: enriched,
       total: result.total,
       message: 'Subscription packages retrieved successfully',
     });
+    return {
+      ...base,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+    };
   }
 }

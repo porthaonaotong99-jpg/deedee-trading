@@ -29,7 +29,6 @@ import {
 import {
   ApplyPremiumMembershipDto,
   SubscriptionStatusDto,
-  RenewSubscriptionDto,
   PremiumMembershipResponseDto,
   ApprovePaymentSlipDto,
 } from './dto/subscription.dto';
@@ -534,176 +533,6 @@ export class CustomerServicesController {
     });
   }
 
-  @Post('subscriptions/renew')
-  @UseGuards(JwtCustomerAuthGuard)
-  @ApiOperation({
-    summary: '[Group: Renew - Legacy] Renew subscription (inline)',
-    description:
-      'LEGACY RENEW FLOW (Group: Renew) using inline duration + fee (deprecated in favor of manual slip + package). Steps: (1) Customer posts renewal, (2) Customer confirms/ uploads slip, (3) Admin approves renewal (legacy endpoints) or payment slip (preferred).',
-  })
-  @ApiBody({
-    type: RenewSubscriptionDto,
-    description: 'Subscription renewal details',
-    examples: {
-      renew3m: {
-        summary: 'Renew 3 months (legacy inline format)',
-        value: {
-          subscription: { duration: 3, fee: 299.99 },
-        },
-      },
-      renew6m: {
-        summary: 'Renew 6 months (legacy inline format)',
-        value: {
-          subscription: { duration: 6, fee: 549.99 },
-        },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Subscription renewal initiated successfully',
-    type: SubscriptionStatusDto,
-  })
-  async renewSubscription(
-    @Body(ValidationPipe) dto: RenewSubscriptionDto,
-    @AuthUser() user: JwtPayload,
-  ) {
-    if (user.type !== 'customer') {
-      throw new ForbiddenException('Only customers can renew subscriptions');
-    }
-    const result = await this.customersService.renewPremiumMembership(
-      user.sub,
-      {
-        duration: dto.subscription.duration,
-        fee: dto.subscription.fee,
-      },
-    );
-    return handleSuccessOne({
-      data: {
-        status: result.status,
-        renewal_service: result.renewal_service,
-        previous_service: result.previous_service,
-        payment: result.payment,
-      },
-      message:
-        'Premium membership renewal initiated successfully. Please complete payment.',
-    });
-  }
-
-  // @Post('payments/:paymentId/confirm')
-  // @UseGuards(JwtCustomerAuthGuard)
-  // @ApiOperation({
-  //   summary: '[Group: Apply/Renew - Legacy] Confirm payment (auto activate)',
-  //   description:
-  //     'LEGACY gateway confirmation; activates service directly after external payment success. Not used for manual slip scenarios.',
-  // })
-  // @ApiResponse({
-  //   status: 200,
-  //   description: 'Payment confirmed and service activated',
-  // })
-  // async confirmPayment(
-  //   @Param('paymentId') paymentId: string,
-  //   @AuthUser() user: JwtPayload,
-  // ) {
-  //   if (user.type !== 'customer') {
-  //     throw new ForbiddenException('Only customers can confirm payments');
-  //   }
-  //   const result = await this.customersService.confirmPayment(paymentId);
-  //   return handleSuccessOne({
-  //     data: result,
-  //     message: 'Payment confirmed successfully',
-  //   });
-  // }
-
-  // @Post('renewals/payments/:paymentId/confirm')
-  // @UseGuards(JwtCustomerAuthGuard)
-  // @ApiOperation({
-  //   summary: '[Group: Renew - Legacy] Confirm renewal payment',
-  //   description:
-  //     'LEGACY gateway renewal confirmation. For manual slip renewals rely on admin payment slip approve.',
-  // })
-  // @ApiResponse({ status: 200, description: 'Renewal payment confirmed' })
-  // async confirmRenewalPayment(
-  //   @Param('paymentId') paymentId: string,
-  //   @AuthUser() user: JwtPayload,
-  // ) {
-  //   if (user.type !== 'customer') {
-  //     throw new ForbiddenException('Only customers can confirm payments');
-  //   }
-  //   const result = await this.customersService.confirmRenewalPayment(paymentId);
-  //   return handleSuccessOne({
-  //     data: result,
-  //     message: 'Renewal payment confirmed successfully',
-  //   });
-  // }
-
-  @Post('renewals/:serviceId/approve')
-  @UseGuards(JwtUserAuthGuard)
-  @ApiOperation({
-    summary: '[Group: Renew - Legacy] Approve renewal (admin)',
-    description:
-      'LEGACY renewal approval for flows initiated with online payment confirmation. Prefer manual payment slip approve endpoint for unified process.',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Renewal approved and activated',
-  })
-  async approveRenewal(
-    @Param('serviceId') serviceId: string,
-    @AuthUser() user: JwtPayload,
-  ) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admins can approve renewals');
-    }
-    const result = await this.customersService.approveRenewal(
-      serviceId,
-      user.sub,
-    );
-    return handleSuccessOne({
-      data: result,
-      message: 'Renewal approved and activated successfully',
-    });
-  }
-
-  @Post('renewals/:serviceId/reject')
-  @UseGuards(JwtUserAuthGuard)
-  @ApiOperation({
-    summary: '[Group: Renew - Legacy] Reject renewal (admin)',
-    description:
-      'LEGACY renewal rejection. Prefer payment slip reject endpoint for manual unified flow.',
-  })
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        rejection_reason: {
-          type: 'string',
-          description: 'Reason for rejection',
-          example: 'Payment verification failed',
-        },
-      },
-    },
-  })
-  @ApiResponse({ status: 200, description: 'Renewal rejected' })
-  async rejectRenewal(
-    @Param('serviceId') serviceId: string,
-    @AuthUser() user: JwtPayload,
-    @Body() body: { rejection_reason?: string },
-  ) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admins can reject renewals');
-    }
-    const result = await this.customersService.rejectRenewal(
-      serviceId,
-      user.sub,
-      body.rejection_reason,
-    );
-    return handleSuccessOne({
-      data: result,
-      message: 'Renewal rejected successfully',
-    });
-  }
-
   @Get('admin/premium-membership/pending')
   @UseGuards(JwtUserAuthGuard)
   @ApiOperation({
@@ -739,10 +568,17 @@ export class CustomerServicesController {
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
-    return handleSuccessOne({
-      data: result,
+    const base = handleSuccessMany({
+      data: result.data,
+      total: result.total,
       message: 'Pending premium membership applications retrieved',
     });
+    return {
+      ...base,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+    };
   }
 
   @Get('payments/history')
@@ -804,11 +640,18 @@ export class CustomerServicesController {
       startDate: parsedStart,
       endDate: parsedEnd,
     });
-    return handleSuccessMany({
+    const base = handleSuccessMany({
       data: res.payments,
       total: res.total,
       message: 'Payment history retrieved',
     });
+    const totalPages = Math.ceil(res.total / effectiveLimit) || 1;
+    return {
+      ...base,
+      page: parsedPage,
+      limit: effectiveLimit,
+      totalPages,
+    };
   }
 
   @Get('admin/payments/audit')
@@ -866,67 +709,6 @@ export class CustomerServicesController {
       message: 'Payment audit logs retrieved',
     });
   }
-
-  // --- Payment Slip Endpoints ---
-
-  // @Post('payments/:paymentId/payment-slip')
-  // @UseGuards(JwtCustomerAuthGuard)
-  // @ApiOperation({
-  //   summary: '[Group: Apply/Renew Manual] Submit payment slip (fallback)',
-  //   description:
-  //     'Manual path for services already created without slip. Prefer combined apply (with slip) or renewal + slip flow.',
-  // })
-  // @ApiParam({
-  //   name: 'paymentId',
-  //   description: 'Payment ID for the service',
-  // })
-  // @ApiBody({
-  //   type: SubmitPaymentSlipDto,
-  //   description: 'Payment slip information',
-  //   examples: {
-  //     renewalSlip: {
-  //       summary: 'Slip for existing pending renewal',
-  //       value: {
-  //         payment_slip_url: 'https://cdn.example.com/slips/renew-3m.jpg',
-  //         payment_slip_filename: 'renew-3m.jpg',
-  //         payment_amount: 299.99,
-  //         payment_reference: 'BANK-RENEW-3M-002',
-  //       },
-  //     },
-  //     missingRef: {
-  //       summary: 'Example with missing optional reference',
-  //       value: {
-  //         payment_slip_url: 'https://cdn.example.com/slips/renew-6m.jpg',
-  //         payment_slip_filename: 'renew-6m.jpg',
-  //         payment_amount: 549.99,
-  //       },
-  //     },
-  //   },
-  // })
-  // @ApiResponse({
-  //   status: 200,
-  //   description: 'Payment slip submitted successfully',
-  // })
-  // async submitPaymentSlip(
-  //   @Param('paymentId') paymentId: string,
-  //   @Body(ValidationPipe) dto: SubmitPaymentSlipDto,
-  //   @AuthUser() user: JwtPayload,
-  // ) {
-  //   if (user.type !== 'customer') {
-  //     throw new ForbiddenException('Only customers can submit payment slips');
-  //   }
-
-  //   const result = await this.customersService.submitPaymentSlipForService(
-  //     user.sub,
-  //     paymentId,
-  //     dto,
-  //   );
-
-  //   return handleSuccessOne({
-  //     data: result,
-  //     message: 'Payment slip submitted successfully. Pending admin review.',
-  //   });
-  // }
 
   @Post('admin/payments/:paymentId/approve')
   @UseGuards(JwtUserAuthGuard)

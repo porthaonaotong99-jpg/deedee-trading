@@ -1653,18 +1653,24 @@ export class CustomersService {
       payment_reference?: string;
     },
   ) {
-    // Check if customer already has active premium membership
-    const existingService = await this.customerServiceRepo.findOne({
-      where: {
-        customer_id: customerId,
-        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
-        active: true,
-      },
-    });
-
-    if (existingService) {
+    // 1) Block if there is any unapproved/pending application (any package)
+    const approvableStatuses = [
+      PaymentStatus.PENDING,
+      PaymentStatus.PAYMENT_SLIP_SUBMITTED,
+      PaymentStatus.PROCESSING,
+    ];
+    const pendingPayment = await this.paymentRepo
+      .createQueryBuilder('p')
+      .leftJoin('p.service', 's')
+      .where('p.customer_id = :cid', { cid: customerId })
+      .andWhere('p.status IN (:...st)', { st: approvableStatuses })
+      .andWhere('s.service_type = :stype', {
+        stype: CustomerServiceType.PREMIUM_MEMBERSHIP,
+      })
+      .getOne();
+    if (pendingPayment) {
       throw new BadRequestException(
-        'Customer already has an active premium membership',
+        'You already have a pending premium membership application under review',
       );
     }
 
@@ -1697,70 +1703,133 @@ export class CustomersService {
       );
     }
 
-    return await this.dataSource.transaction(
-      async (transactionalEntityManager) => {
-        const paymentRepo = transactionalEntityManager.getRepository(Payment);
-
-        // Apply the service with pending payment status
-        const serviceResult = await this.applyService(
-          customerId,
-          CustomerServiceType.PREMIUM_MEMBERSHIP,
-          {
-            subscription: {
-              duration,
-              fee,
-            },
-          },
+    // 2) If applying different package while current subscription not expired -> block
+    const now = new Date();
+    const currentActive = await this.customerServiceRepo.findOne({
+      where: {
+        customer_id: customerId,
+        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+        active: true,
+      },
+    });
+    if (currentActive) {
+      const notExpired =
+        !currentActive.subscription_expires_at ||
+        currentActive.subscription_expires_at > now;
+      if (notExpired && currentActive.subscription_package_id !== packageId) {
+        throw new BadRequestException(
+          'Your current premium membership is still active. You cannot switch to a different package until it expires.',
         );
+      }
+    }
 
-        // Link chosen package to the service
-        await transactionalEntityManager.update(
-          this.customerServiceRepo.target,
-          { id: serviceResult.service.id },
-          { subscription_package_id: packageId },
+    // 3/4) Proceed with transaction to reuse/update existing service or create new and create payment
+    return await this.dataSource.transaction(async (manager) => {
+      const serviceRepo = manager.getRepository(CustomerService);
+      const paymentRepo = manager.getRepository(Payment);
+
+      // Re-check pending payment inside transaction for race conditions
+      const pendingInside = await paymentRepo
+        .createQueryBuilder('p')
+        .leftJoin('p.service', 's')
+        .where('p.customer_id = :cid', { cid: customerId })
+        .andWhere('p.status IN (:...st)', { st: approvableStatuses })
+        .andWhere('s.service_type = :stype', {
+          stype: CustomerServiceType.PREMIUM_MEMBERSHIP,
+        })
+        .getOne();
+      if (pendingInside) {
+        throw new BadRequestException(
+          'You already have a pending premium membership application under review',
         );
+      }
 
-        // Create payment record with slip data submitted immediately
-        const manualIntentId = `manual-${Date.now()}-${customerId}`;
-        // Since the slip is provided at application time, mark it as submitted immediately
-        const paymentEntity: Partial<Payment> = {
+      // Determine target service to attach this application to
+      const latestService = await serviceRepo.findOne({
+        where: {
           customer_id: customerId,
-          service_id: serviceResult.service.id,
-          payment_type: PaymentType.SUBSCRIPTION,
-          payment_method: PaymentMethod.MANUAL_TRANSFER,
+          service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+        },
+        order: { applied_at: 'DESC' },
+      });
+
+      let targetService: CustomerService;
+
+      if (!latestService) {
+        // No existing service: create a new pending service
+        targetService = serviceRepo.create({
+          customer_id: customerId,
+          service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+          active: false,
+          requires_payment: true,
+          subscription_duration: duration,
+          subscription_fee: fee,
+          subscription_expires_at: null,
+          subscription_package_id: packageId,
+        });
+        targetService = await serviceRepo.save(targetService);
+      } else {
+        const samePackage = latestService.subscription_package_id === packageId;
+        // If currently active and same package: deactivate before new application
+        if (latestService.active && samePackage) {
+          await serviceRepo.update(latestService.id, { active: false });
+        }
+
+        // Update existing service with new package details
+        await serviceRepo.update(latestService.id, {
+          subscription_fee: fee,
+          subscription_duration: duration,
+          subscription_package_id: packageId,
+          subscription_expires_at: null, // will be set on approval
+          active: false,
+        });
+        targetService = {
+          ...latestService,
+          subscription_fee: fee,
+          subscription_duration: duration,
+          subscription_package_id: packageId,
+          subscription_expires_at: null,
+          active: false,
+        } as CustomerService;
+      }
+
+      // Create payment record with slip data submitted immediately
+      const manualIntentId = `manual-${Date.now()}-${customerId}`;
+      const paymentEntity: Partial<Payment> = {
+        customer_id: customerId,
+        service_id: targetService.id,
+        payment_type: PaymentType.SUBSCRIPTION,
+        payment_method: PaymentMethod.MANUAL_TRANSFER,
+        amount: fee,
+        currency: 'USD',
+        status: PaymentStatus.PENDING,
+        description: `Premium Membership - ${duration} months (Manual Payment)`,
+        payment_intent_id: manualIntentId,
+        external_payment_id: manualIntentId,
+        payment_url: undefined,
+        payment_url_expires_at: undefined,
+        payment_slip_url: paymentSlipData.payment_slip_url,
+        payment_slip_filename: paymentSlipData.payment_slip_filename,
+        payment_reference: paymentSlipData.payment_reference,
+        payment_slip_submitted_at: new Date(),
+        payment_metadata: { package_id: packageId },
+        subscription_package_id: packageId,
+      };
+      const paymentRecord = await paymentRepo.save(paymentEntity);
+
+      return {
+        status: 'pending',
+        service: targetService,
+        payment: {
+          payment_id: paymentRecord.id,
           amount: fee,
           currency: 'USD',
-          // Directly mark as slip submitted so it can be approved without extra user step
-          status: PaymentStatus.PENDING,
-          // status: PaymentStatus.PAYMENT_SLIP_SUBMITTED,
-          description: `Premium Membership - ${duration} months (Manual Payment)`,
-          payment_intent_id: manualIntentId,
-          external_payment_id: manualIntentId,
-          payment_url: undefined,
-          payment_url_expires_at: undefined,
-          payment_slip_url: paymentSlipData.payment_slip_url,
-          payment_slip_filename: paymentSlipData.payment_slip_filename,
-          payment_reference: paymentSlipData.payment_reference,
-          payment_slip_submitted_at: new Date(),
-          payment_metadata: { package_id: packageId },
-          subscription_package_id: packageId,
-        };
-        const paymentRecord = await paymentRepo.save(paymentEntity);
-
-        return {
-          status: 'pending',
-          service: serviceResult.service,
-          payment: {
-            payment_id: paymentRecord.id,
-            amount: fee,
-            currency: 'USD',
-            payment_slip_filename: paymentRecord.payment_slip_filename,
-            submitted_at: paymentRecord.payment_slip_submitted_at,
-            instructions: 'Payment recorded and pending admin review.',
-          },
-        };
-      },
-    );
+          payment_slip_filename: paymentRecord.payment_slip_filename,
+          submitted_at: paymentRecord.payment_slip_submitted_at,
+          instructions: 'Payment recorded and pending admin review.',
+        },
+      };
+    });
   }
 
   async submitPaymentSlipForService(
@@ -1858,12 +1927,16 @@ export class CustomersService {
           paid_at: now,
         });
 
-        // Ensure subscription expiration & fee are set
+        // Ensure subscription expiration & fee are set, and extend on subsequent approvals
         const service = payment.service;
+        const base =
+          service.subscription_expires_at &&
+          service.subscription_expires_at > now
+            ? service.subscription_expires_at
+            : now;
         let subscriptionExpiresAt = service.subscription_expires_at;
-        if (!subscriptionExpiresAt && service.subscription_duration) {
-          const baseDate = service.applied_at || now;
-          const exp = new Date(baseDate);
+        if (service.subscription_duration) {
+          const exp = new Date(base);
           exp.setMonth(exp.getMonth() + service.subscription_duration);
           subscriptionExpiresAt = exp;
         }
@@ -2225,88 +2298,50 @@ export class CustomersService {
   async getPendingPremiumMemberships(
     options: PaginationOptions = {},
   ): Promise<PaginatedResult<PendingPremiumMembership>> {
-    // First, get all premium membership services that are inactive (pending approval)
-    const [allPendingServices] = await this.customerServiceRepo.findAndCount({
-      where: {
-        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
-        active: false,
-      },
-      relations: ['customer'],
-      order: {
-        applied_at: 'DESC',
-      },
-    });
-
-    // Filter services that have successful payments
-    let servicesWithPayments: PendingPremiumMembership[] = [];
-
-    for (const service of allPendingServices) {
-      // Check if this service has a successful payment
-      const payments = await this.paymentRecordService.getPaymentsByService(
-        service.id,
-        PaymentStatus.PENDING,
-      );
-
-      servicesWithPayments = payments.map((payment) => ({
-        service_id: service.id,
-        customer_id: service.customer_id,
-        customer_info: {
-          username: service.customer.username,
-          email: service.customer.email,
-          first_name: service.customer.first_name,
-          last_name: service.customer.last_name,
-        },
-        service_type: service.service_type,
-        subscription_duration: service.subscription_duration,
-        subscription_fee: service.subscription_fee,
-        applied_at: service.applied_at,
-        payment_info: {
-          payment_id: payment.id,
-          amount: payment.amount,
-          paid_at: payment.paid_at || payment.updated_at,
-          status: payment.status,
-          payment_slip_url: payment.payment_slip_url || undefined,
-        },
-      }));
-
-      // NOTE: If multiple payments exist, this will add multiple entries for the same service.
-      // This is intentional to show all payment attempts for admin review.
-
-      // const successfulPayment = payments.find(
-      //   (payment) => payment.status === PaymentStatus.PENDING,
-      // );
-
-      // if (successfulPayment) {
-      //   servicesWithPayments.push({
-      //     service_id: service.id,
-      //     customer_id: service.customer_id,
-      //     customer_info: {
-      //       username: service.customer.username,
-      //       email: service.customer.email,
-      //       first_name: service.customer.first_name,
-      //       last_name: service.customer.last_name,
-      //     },
-      //     service_type: service.service_type,
-      //     subscription_duration: service.subscription_duration,
-      //     subscription_fee: service.subscription_fee,
-      //     applied_at: service.applied_at,
-      //     payment_info: {
-      //       payment_id: successfulPayment.id,
-      //       amount: successfulPayment.amount,
-      //       paid_at: successfulPayment.paid_at || successfulPayment.updated_at,
-      //       status: successfulPayment.status,
-      //       payment_slip_url: successfulPayment.payment_slip_url || undefined,
-      //     },
-      //   });
-      // }
-    }
-
-    // Apply pagination to filtered results using utility
-    return PaginationUtil.paginateArray(servicesWithPayments, {
+    const { page, limit, skip } = PaginationUtil.calculatePagination({
       page: options.page,
       limit: options.limit,
       defaultLimit: 20,
       maxLimit: 100,
     });
+
+    const qb = this.paymentRepo
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.service', 's')
+      .leftJoinAndSelect('s.customer', 'c')
+      .where('p.status = :status', { status: PaymentStatus.PENDING })
+      .andWhere('s.service_type = :stype', {
+        stype: CustomerServiceType.PREMIUM_MEMBERSHIP,
+      })
+      .orderBy('p.created_at', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [payments, total] = await qb.getManyAndCount();
+
+    const data: PendingPremiumMembership[] = payments.map((payment) => ({
+      service_id: payment.service_id,
+      customer_id: payment.customer_id,
+      customer_info: {
+        username: payment.service?.customer?.username || '',
+        email: payment.service?.customer?.email || '',
+        first_name: payment.service?.customer?.first_name || '',
+        last_name: payment.service?.customer?.last_name || '',
+      },
+      service_type:
+        payment.service?.service_type || CustomerServiceType.PREMIUM_MEMBERSHIP,
+      subscription_duration: payment.service?.subscription_duration || null,
+      subscription_fee: payment.service?.subscription_fee || null,
+      applied_at: payment.service?.applied_at || payment.created_at,
+      payment_info: {
+        payment_id: payment.id,
+        amount: payment.amount,
+        paid_at: payment.paid_at || payment.updated_at,
+        status: payment.status,
+        payment_slip_url: payment.payment_slip_url || undefined,
+      },
+    }));
+
+    return PaginationUtil.createPaginatedResult(data, total, { page, limit });
   }
 }
