@@ -41,7 +41,10 @@ import {
   MaritalStatus,
   RiskTolerance,
 } from '../../common/enums';
-import { handleSuccessOne } from '../../common/utils/response.util';
+import {
+  handleSuccessOne,
+  handleSuccessMany,
+} from '../../common/utils/response.util';
 import {
   ServiceApplyRequestExamples,
   ServiceApplyResponseExamples,
@@ -755,24 +758,55 @@ export class CustomerServicesController {
     description: 'Number of records to return (default: 50)',
   })
   @ApiQuery({
-    name: 'offset',
+    name: 'page',
     required: false,
     type: Number,
-    description: 'Number of records to skip (default: 0)',
+    description: 'Page number (1-based, default: 1)',
+  })
+  @ApiQuery({
+    name: 'start_date',
+    required: false,
+    type: String,
+    description: 'Filter payments created on/after this ISO date (YYYY-MM-DD)',
+  })
+  @ApiQuery({
+    name: 'end_date',
+    required: false,
+    type: String,
+    description: 'Filter payments created on/before this ISO date (YYYY-MM-DD)',
   })
   @ApiResponse({
     status: 200,
     description: 'Payment history retrieved successfully',
   })
-  getPaymentHistory(@AuthUser() user: JwtPayload) {
+  async getPaymentHistory(
+    @AuthUser() user: JwtPayload,
+    @Query('limit') limit?: string,
+    @Query('page') page?: string,
+    @Query('start_date') startDate?: string,
+    @Query('end_date') endDate?: string,
+  ) {
     if (user.type !== 'customer') {
       throw new ForbiddenException('Only customers can view payment history');
     }
 
-    // This would need to be implemented in the service
-    // For now, return a placeholder
-    return handleSuccessOne({
-      data: { message: 'Payment history feature available in service layer' },
+    const parsedLimit = limit ? parseInt(limit, 10) : undefined;
+    const parsedPage = page ? parseInt(page, 10) : 1;
+    const effectiveLimit = parsedLimit && parsedLimit > 0 ? parsedLimit : 50;
+    const offset = (parsedPage > 0 ? parsedPage - 1 : 0) * effectiveLimit;
+
+    const parsedStart = startDate ? new Date(startDate) : undefined;
+    const parsedEnd = endDate ? new Date(endDate) : undefined;
+
+    const res = await this.customersService.getPaymentHistory(user.sub, {
+      limit: effectiveLimit,
+      offset,
+      startDate: parsedStart,
+      endDate: parsedEnd,
+    });
+    return handleSuccessMany({
+      data: res.payments,
+      total: res.total,
       message: 'Payment history retrieved',
     });
   }

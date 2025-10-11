@@ -235,4 +235,54 @@ export class PaymentRecordService {
       relations: ['service', 'customer'],
     });
   }
+
+  async getPaymentHistory(
+    customerId: string,
+    options?: {
+      status?: PaymentStatus;
+      payment_type?: PaymentType;
+      limit?: number;
+      offset?: number;
+      startDate?: Date;
+      endDate?: Date;
+    },
+  ) {
+    const qb = this.paymentRepo
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.service', 'service')
+      .where('payment.customer_id = :customerId', { customerId });
+
+    if (options?.status) {
+      qb.andWhere('payment.status = :status', { status: options.status });
+    }
+
+    if (options?.payment_type) {
+      qb.andWhere('payment.payment_type = :payment_type', {
+        payment_type: options.payment_type,
+      });
+    }
+
+    if (options?.startDate) {
+      qb.andWhere('payment.created_at >= :startDate', {
+        startDate: options.startDate,
+      });
+    }
+
+    if (options?.endDate) {
+      qb.andWhere('payment.created_at <= :endDate', {
+        endDate: options.endDate,
+      });
+    }
+
+    const limit = options?.limit ?? 50;
+    const offset = options?.offset ?? 0;
+
+    const [payments, total] = await qb
+      .orderBy('payment.created_at', 'DESC')
+      .limit(limit)
+      .offset(offset)
+      .getManyAndCount();
+
+    return { payments, total, limit, offset };
+  }
 }

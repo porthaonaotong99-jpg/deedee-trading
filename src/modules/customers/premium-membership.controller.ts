@@ -32,7 +32,6 @@ export class PremiumMembershipAdminController {
     @Query('limit') limit?: string,
   ) {
     if (user.type !== 'user') throw new ForbiddenException();
-    console.log('===== Pending Premium Memberships =====');
     const result = await this.customersService.getPendingPremiumMemberships({
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,

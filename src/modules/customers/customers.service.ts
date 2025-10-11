@@ -218,6 +218,20 @@ export class CustomersService {
     };
   }
 
+  async getPaymentHistory(
+    customerId: string,
+    options?: {
+      status?: PaymentStatus;
+      payment_type?: PaymentType;
+      limit?: number;
+      offset?: number;
+      startDate?: Date;
+      endDate?: Date;
+    },
+  ) {
+    return this.paymentRecordService.getPaymentHistory(customerId, options);
+  }
+
   async update(id: string, dto: UpdateCustomerDto) {
     const entity = await this.findOne(id);
     Object.assign(entity, dto);
@@ -2232,7 +2246,6 @@ export class CustomersService {
         service.id,
         PaymentStatus.PENDING,
       );
-      console.log({ payments });
 
       servicesWithPayments = payments.map((payment) => ({
         service_id: service.id,

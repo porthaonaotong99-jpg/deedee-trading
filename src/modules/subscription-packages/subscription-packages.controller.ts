@@ -56,7 +56,6 @@ export class SubscriptionPackagesController {
     // Try to parse Authorization header (optional)
     let user: JwtPayload | undefined;
     const auth = req.headers.authorization;
-    console.log({ req });
     if (auth?.startsWith('Bearer ')) {
       const token = auth.substring(7);
       try {
@@ -74,7 +73,6 @@ export class SubscriptionPackagesController {
 
     // If authenticated as customer, enrich using current service's subscription_package_id
     let enriched = result.data;
-    console.log({ user });
     if (user?.type === 'customer') {
       const now = new Date();
       // Get the active premium membership service (current subscription)
@@ -92,8 +90,6 @@ export class SubscriptionPackagesController {
         },
         order: { applied_at: 'DESC' },
       });
-
-      console.log({ activeService });
 
       let currentPackageId: string | undefined;
       let expires: Date | null = null;
