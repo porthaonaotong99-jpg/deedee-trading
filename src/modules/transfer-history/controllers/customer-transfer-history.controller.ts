@@ -27,7 +27,7 @@ import type { JwtPayload } from '../../../common/interfaces';
 @ApiTags('Customer Transfer History')
 @ApiBearerAuth()
 @UseGuards(JwtCustomerAuthGuard)
-@Controller('customers/transfer-history')
+@Controller('transfer-history')
 export class CustomerTransferHistoryController {
   constructor(private readonly service: TransferHistoryService) {}
 
@@ -65,7 +65,6 @@ export class CustomerTransferHistoryController {
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
   ) {
-    console.log({ user });
     if (user.type !== 'customer')
       throw new ForbiddenException(
         'Only customers can access their transfer history',
