@@ -106,6 +106,10 @@ export class Payment {
   @Column({ type: 'json', nullable: true })
   provider_response: Record<string, unknown> | null;
 
+  // Link to subscription package (if applicable)
+  @Column({ type: 'uuid', nullable: true })
+  subscription_package_id: string | null;
+
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
   refunded_amount: number;
 

@@ -63,7 +63,7 @@ import {
   PaymentAuditAction,
   PaymentAuditLevel,
 } from '../payments/entities/payment-audit-log.entity';
-import { SubscriptionPackage } from './entities/subscription-package.entity';
+import { SubscriptionPackagesService } from '../subscription-packages/subscription-packages.service';
 import {
   ServiceFundTransaction,
   ServiceFundTransactionType,
@@ -120,8 +120,7 @@ export class CustomersService {
     private readonly passwordResetRepo: Repository<PasswordReset>,
     @InjectRepository(Payment)
     private readonly paymentRepo: Repository<Payment>,
-    @InjectRepository(SubscriptionPackage)
-    private readonly subscriptionPackageRepo: Repository<SubscriptionPackage>,
+    private readonly subscriptionPackagesService: SubscriptionPackagesService,
     @InjectRepository(ServiceFundTransaction)
     private readonly serviceFundTxRepo: Repository<ServiceFundTransaction>,
     private readonly dataSource: DataSource,
@@ -361,9 +360,10 @@ export class CustomersService {
         where: { id: serviceId, customer_id: customerId },
       });
       if (!service) throw new NotFoundException('Service not found');
-      if (
-        service.service_type !== CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT
-      ) {
+      const isIntl =
+        service.service_type ===
+        CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT;
+      if (!isIntl) {
         throw new BadRequestException(
           'Service is not an international stock account',
         );
@@ -1655,13 +1655,10 @@ export class CustomersService {
     }
 
     // Load subscription package
-    const pkg = await this.subscriptionPackageRepo.findOne({
-      where: {
-        id: packageId,
-        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
-        active: true,
-      },
-    });
+    const pkg = await this.subscriptionPackagesService.findActiveById(
+      packageId,
+      CustomerServiceType.PREMIUM_MEMBERSHIP,
+    );
 
     if (!pkg) {
       throw new BadRequestException(
@@ -1702,6 +1699,13 @@ export class CustomersService {
           },
         );
 
+        // Link chosen package to the service
+        await transactionalEntityManager.update(
+          this.customerServiceRepo.target,
+          { id: serviceResult.service.id },
+          { subscription_package_id: packageId },
+        );
+
         // Create payment record with slip data submitted immediately
         const manualIntentId = `manual-${Date.now()}-${customerId}`;
         // Since the slip is provided at application time, mark it as submitted immediately
@@ -1713,7 +1717,8 @@ export class CustomersService {
           amount: fee,
           currency: 'USD',
           // Directly mark as slip submitted so it can be approved without extra user step
-          status: PaymentStatus.PAYMENT_SLIP_SUBMITTED,
+          status: PaymentStatus.PENDING,
+          // status: PaymentStatus.PAYMENT_SLIP_SUBMITTED,
           description: `Premium Membership - ${duration} months (Manual Payment)`,
           payment_intent_id: manualIntentId,
           external_payment_id: manualIntentId,
@@ -1723,6 +1728,8 @@ export class CustomersService {
           payment_slip_filename: paymentSlipData.payment_slip_filename,
           payment_reference: paymentSlipData.payment_reference,
           payment_slip_submitted_at: new Date(),
+          payment_metadata: { package_id: packageId },
+          subscription_package_id: packageId,
         };
         const paymentRecord = await paymentRepo.save(paymentEntity);
 
@@ -1894,13 +1901,10 @@ export class CustomersService {
       );
     }
 
-    const pkg = await this.subscriptionPackageRepo.findOne({
-      where: {
-        id: packageId,
-        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
-        active: true,
-      },
-    });
+    const pkg = await this.subscriptionPackagesService.findActiveById(
+      packageId,
+      CustomerServiceType.PREMIUM_MEMBERSHIP,
+    );
 
     if (!pkg) {
       throw new BadRequestException(
@@ -1936,6 +1940,7 @@ export class CustomersService {
         subscription_duration: duration,
         subscription_fee: fee,
         subscription_expires_at: null, // set upon approval
+        subscription_package_id: packageId,
       });
       const savedService = await serviceRepo.save(renewalService);
 
@@ -1958,6 +1963,8 @@ export class CustomersService {
         payment_slip_filename: paymentSlip.payment_slip_filename,
         payment_reference: paymentSlip.payment_reference,
         payment_slip_submitted_at: new Date(),
+        payment_metadata: { package_id: packageId },
+        subscription_package_id: packageId,
       };
       const paymentRecord = await paymentRepo.save(paymentEntity);
 
@@ -2217,7 +2224,7 @@ export class CustomersService {
     });
 
     // Filter services that have successful payments
-    const servicesWithPayments: PendingPremiumMembership[] = [];
+    let servicesWithPayments: PendingPremiumMembership[] = [];
 
     for (const service of allPendingServices) {
       // Check if this service has a successful payment
@@ -2225,34 +2232,60 @@ export class CustomersService {
         service.id,
         PaymentStatus.PENDING,
       );
+      console.log({ payments });
 
-      const successfulPayment = payments.find(
-        (payment) => payment.status === PaymentStatus.PENDING,
-      );
+      servicesWithPayments = payments.map((payment) => ({
+        service_id: service.id,
+        customer_id: service.customer_id,
+        customer_info: {
+          username: service.customer.username,
+          email: service.customer.email,
+          first_name: service.customer.first_name,
+          last_name: service.customer.last_name,
+        },
+        service_type: service.service_type,
+        subscription_duration: service.subscription_duration,
+        subscription_fee: service.subscription_fee,
+        applied_at: service.applied_at,
+        payment_info: {
+          payment_id: payment.id,
+          amount: payment.amount,
+          paid_at: payment.paid_at || payment.updated_at,
+          status: payment.status,
+          payment_slip_url: payment.payment_slip_url || undefined,
+        },
+      }));
 
-      if (successfulPayment) {
-        servicesWithPayments.push({
-          service_id: service.id,
-          customer_id: service.customer_id,
-          customer_info: {
-            username: service.customer.username,
-            email: service.customer.email,
-            first_name: service.customer.first_name,
-            last_name: service.customer.last_name,
-          },
-          service_type: service.service_type,
-          subscription_duration: service.subscription_duration,
-          subscription_fee: service.subscription_fee,
-          applied_at: service.applied_at,
-          payment_info: {
-            payment_id: successfulPayment.id,
-            amount: successfulPayment.amount,
-            paid_at: successfulPayment.paid_at || successfulPayment.updated_at,
-            status: successfulPayment.status,
-            payment_slip_url: successfulPayment.payment_slip_url || undefined,
-          },
-        });
-      }
+      // NOTE: If multiple payments exist, this will add multiple entries for the same service.
+      // This is intentional to show all payment attempts for admin review.
+
+      // const successfulPayment = payments.find(
+      //   (payment) => payment.status === PaymentStatus.PENDING,
+      // );
+
+      // if (successfulPayment) {
+      //   servicesWithPayments.push({
+      //     service_id: service.id,
+      //     customer_id: service.customer_id,
+      //     customer_info: {
+      //       username: service.customer.username,
+      //       email: service.customer.email,
+      //       first_name: service.customer.first_name,
+      //       last_name: service.customer.last_name,
+      //     },
+      //     service_type: service.service_type,
+      //     subscription_duration: service.subscription_duration,
+      //     subscription_fee: service.subscription_fee,
+      //     applied_at: service.applied_at,
+      //     payment_info: {
+      //       payment_id: successfulPayment.id,
+      //       amount: successfulPayment.amount,
+      //       paid_at: successfulPayment.paid_at || successfulPayment.updated_at,
+      //       status: successfulPayment.status,
+      //       payment_slip_url: successfulPayment.payment_slip_url || undefined,
+      //     },
+      //   });
+      // }
     }
 
     // Apply pagination to filtered results using utility

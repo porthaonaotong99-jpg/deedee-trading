@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import 'tsconfig-paths/register';
 import { DataSource } from 'typeorm';
-import { SubscriptionPackage } from '../src/modules/customers/entities/subscription-package.entity';
+import { SubscriptionPackage } from '../src/modules/subscription-packages/entities/subscription-package.entity';
 import { CustomerServiceType } from '../src/modules/customers/entities/customer-service.entity';
 
 // Basic TypeORM DataSource creation leveraging existing config shape
@@ -63,6 +63,13 @@ async function bootstrap() {
       price: '299.99',
       currency: 'USD',
       description: '3-month premium membership',
+      features: [
+        'Membership: 3 months',
+        'Advanced stock analysis tools',
+        'Unlimited stock picks',
+        'Portfolio tracking',
+        'Priority support',
+      ],
       active: true,
     },
     {
@@ -71,6 +78,14 @@ async function bootstrap() {
       price: '549.99',
       currency: 'USD',
       description: '6-month premium membership',
+      features: [
+        'Membership: 6 months (save 10%)',
+        'Advanced stock analysis tools',
+        'Unlimited stock picks',
+        'Portfolio tracking',
+        'Priority support',
+        'Cheaper monthly rate than Basic',
+      ],
       active: true,
     },
     {
@@ -79,6 +94,14 @@ async function bootstrap() {
       price: '999.99',
       currency: 'USD',
       description: '12-month premium membership',
+      features: [
+        'Membership: 12 months (save 20%)',
+        'Advanced stock analysis tools',
+        'Unlimited stock picks',
+        'Portfolio tracking',
+        'Priority support',
+        'Best monthly rate',
+      ],
       active: true,
     },
   ];

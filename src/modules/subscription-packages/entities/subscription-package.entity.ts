@@ -6,7 +6,7 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm';
-import { CustomerServiceType } from './customer-service.entity';
+import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
 
 @Entity('subscription_packages')
 @Index('idx_subscription_packages_active', ['active'])
@@ -29,6 +29,10 @@ export class SubscriptionPackage {
 
   @Column({ type: 'text', nullable: true })
   description!: string | null;
+
+  // Optional list of feature bullet points for UI display
+  @Column({ type: 'text', array: true, nullable: true })
+  features!: string[] | null;
 
   @Column({ type: 'boolean', default: true })
   active!: boolean;

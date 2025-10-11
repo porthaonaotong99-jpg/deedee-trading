@@ -35,7 +35,7 @@ import { AuthUser } from '../../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../../common/interfaces';
 import {
   handleSuccessOne,
-  handleSuccessPaginated,
+  handleSuccessMany,
 } from '../../../common/utils/response.util';
 
 @ApiTags('Admin Stock Picks')
@@ -131,12 +131,9 @@ export class AdminStockPicksController {
 
     const result = await this.stockPicksService.getAllStockPicks(filterDto);
 
-    return handleSuccessPaginated({
+    return handleSuccessMany({
       data: result.data,
       total: result.total,
-      page: result.page,
-      limit: result.limit,
-      totalPages: result.totalPages,
       message: 'Stock picks retrieved successfully',
     });
   }
@@ -248,12 +245,9 @@ export class AdminStockPicksController {
       limit,
     );
 
-    return handleSuccessPaginated({
+    return handleSuccessMany({
       data: result.data,
       total: result.total,
-      page: result.page,
-      limit: result.limit,
-      totalPages: result.totalPages,
       message: 'Pending approvals retrieved successfully',
     });
   }

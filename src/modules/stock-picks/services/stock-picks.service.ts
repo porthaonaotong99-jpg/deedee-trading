@@ -22,6 +22,7 @@ import {
   StockPickResponseDto,
   CustomerStockPickResponseDto,
   CustomerViewStockPickDto,
+  CustomerMySelectionItemDto,
 } from '../dto/stock-picks.dto';
 import {
   PaginationUtil,
@@ -284,6 +285,40 @@ export class StockPicksService {
     });
   }
 
+  async getCustomerSelectionsCards(
+    customerId: string,
+    page = 1,
+    limit = 10,
+  ): Promise<PaginatedResult<CustomerMySelectionItemDto>> {
+    const {
+      page: validPage,
+      limit: validLimit,
+      skip,
+    } = PaginationUtil.calculatePagination({
+      page,
+      limit,
+      defaultLimit: 10,
+      maxLimit: 50,
+    });
+
+    const [data, total] = await this.customerPickRepo.findAndCount({
+      where: { customer_id: customerId },
+      order: { selected_at: 'DESC' },
+      skip,
+      take: validLimit,
+      relations: ['stock_pick'],
+    });
+
+    const mappedData = data.map((pick) =>
+      this.mapToCustomerMySelectionItem(pick),
+    );
+
+    return PaginationUtil.createPaginatedResult(mappedData, total, {
+      page: validPage,
+      limit: validLimit,
+    });
+  }
+
   // Payment slip methods
   async submitPaymentSlip(
     customerId: string,
@@ -536,6 +571,7 @@ export class StockPicksService {
     return {
       id: stockPick.id,
       stock_symbol: stockPick.stock_symbol,
+      company: stockPick.company ?? undefined,
       description: stockPick.description,
       status: stockPick.status,
       availability: stockPick.availability,
@@ -544,6 +580,7 @@ export class StockPicksService {
       admin_notes: stockPick.admin_notes ?? undefined,
       target_price: stockPick.target_price ?? undefined,
       current_price: stockPick.current_price ?? undefined,
+      recommendation: stockPick.recommendation ?? undefined,
       sale_price: stockPick.sale_price,
       risk_level: stockPick.risk_level ?? undefined,
       expected_return_min_percent:
@@ -576,6 +613,8 @@ export class StockPicksService {
       target_price: stockPick.target_price ?? undefined,
       current_price: stockPick.current_price ?? undefined,
       sale_price: stockPick.sale_price,
+      company: stockPick.company ?? undefined,
+      recommendation: stockPick.recommendation ?? undefined,
       risk_level: stockPick.risk_level ?? undefined,
       expected_return_min_percent:
         stockPick.expected_return_min_percent ?? undefined,
@@ -592,6 +631,103 @@ export class StockPicksService {
       created_at: stockPick.created_at,
       is_selected: isSelected,
       // Note: stock_symbol is intentionally excluded
+    };
+  }
+
+  // Card mapping for "my-selections"
+  private mapToCustomerMySelectionItem(customerPick: CustomerStockPick) {
+    const toNum = (v: unknown): number | undefined => {
+      if (v === null || v === undefined) return undefined;
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const targetPrice = toNum(customerPick.stock_pick?.target_price);
+    const currentPrice = toNum(customerPick.stock_pick?.current_price);
+    let changePercent: number | undefined = undefined;
+    if (
+      targetPrice !== undefined &&
+      targetPrice !== null &&
+      targetPrice > 0 &&
+      currentPrice !== undefined &&
+      currentPrice !== null
+    ) {
+      changePercent = ((currentPrice - targetPrice) / targetPrice) * 100;
+    }
+    const isPositive =
+      changePercent === undefined ? undefined : changePercent >= 0;
+
+    const formatMoney = (val?: number) =>
+      typeof val === 'number' && Number.isFinite(val)
+        ? `$${val.toFixed(2)}`
+        : undefined;
+    const formatChange = (val?: number) =>
+      typeof val === 'number'
+        ? `${val >= 0 ? '+' : ''}${val.toFixed(1)}%`
+        : undefined;
+    const toTitleCaseRec = (rec?: string | null) => {
+      if (!rec) return undefined;
+      switch (rec) {
+        case 'buy':
+          return 'Buy';
+        case 'hold':
+          return 'Hold';
+        case 'strong_buy':
+          return 'Strong Buy';
+        case 'sell':
+          return 'Sell';
+        default:
+          return undefined;
+      }
+    };
+    const formatDate = (d?: Date | null) => {
+      if (!d) return undefined;
+      try {
+        return new Date(d).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        });
+      } catch {
+        return undefined;
+      }
+    };
+
+    return {
+      id: customerPick.id,
+      date:
+        formatDate(customerPick.approved_at ?? customerPick.selected_at) ?? '',
+      stock:
+        customerPick.status === CustomerPickStatus.APPROVED
+          ? customerPick.stock_pick?.stock_symbol
+          : undefined,
+      company:
+        customerPick.stock_pick?.company ||
+        customerPick.stock_pick?.stock_symbol ||
+        'N/A',
+      buyPrice: formatMoney(targetPrice),
+      currentPrice: formatMoney(currentPrice),
+      change: formatChange(changePercent),
+      isPositive: isPositive,
+      // Current customer pick status label
+      status:
+        customerPick.status === CustomerPickStatus.PAYMENT_SUBMITTED
+          ? 'Payment Submitted'
+          : customerPick.status === CustomerPickStatus.APPROVED
+            ? 'Approved'
+            : customerPick.status === CustomerPickStatus.REJECTED
+              ? 'Rejected'
+              : customerPick.status === CustomerPickStatus.EMAIL_SENT
+                ? 'Email Sent'
+                : 'Selected',
+      recommendation:
+        toTitleCaseRec(customerPick.stock_pick?.recommendation ?? undefined) ||
+        'N/A',
+      risk_level: customerPick.stock_pick?.risk_level
+        ? customerPick.stock_pick.risk_level
+            .split('_')
+            .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+            .join(' ')
+        : 'N/A',
     };
   }
 

@@ -13,7 +13,6 @@ import { CustomerKyc } from './entities/customer-kyc.entity';
 import { CustomerDocument } from './entities/customer-document.entity';
 import { CustomerAddress } from './entities/customer-address.entity';
 import { PasswordReset } from './entities/password-reset.entity';
-import { SubscriptionPackage } from './entities/subscription-package.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { PaymentAuditLog } from '../payments/entities/payment-audit-log.entity';
 import { CustomerKycServiceUsage } from './entities/customer-kyc-service-usage.entity';
@@ -21,6 +20,7 @@ import { NodemailerEmailService } from './services/email.service';
 // Payment related providers moved to PaymentsModule
 import { PaymentsModule } from '../payments/payments.module';
 import { SubscriptionSchedulerService } from './services/subscription-scheduler.service';
+import { SubscriptionPackagesModule } from '../subscription-packages/subscription-packages.module';
 import { getJwtConfig } from '../../config/jwt.config';
 import { ServiceFundTransaction } from './entities/service-fund-transaction.entity';
 
@@ -33,7 +33,6 @@ import { ServiceFundTransaction } from './entities/service-fund-transaction.enti
       CustomerDocument,
       CustomerAddress,
       PasswordReset,
-      SubscriptionPackage,
       Payment,
       PaymentAuditLog,
       CustomerKycServiceUsage,
@@ -45,6 +44,7 @@ import { ServiceFundTransaction } from './entities/service-fund-transaction.enti
       inject: [ConfigService],
     }),
     PaymentsModule,
+    SubscriptionPackagesModule,
   ],
   controllers: [CustomersController, CustomerServicesController],
   providers: [

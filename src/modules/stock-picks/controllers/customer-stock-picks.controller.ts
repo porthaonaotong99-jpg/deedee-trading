@@ -26,12 +26,13 @@ import {
   CustomerViewStockPickDto,
   CustomerStockPickResponseDto,
   CustomerSubmitPaymentSlipDto,
+  CustomerMySelectionItemDto,
 } from '../dto/stock-picks.dto';
 import { AuthUser } from '../../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../../common/interfaces';
 import {
   handleSuccessOne,
-  handleSuccessPaginated,
+  handleSuccessMany,
 } from '../../../common/utils/response.util';
 
 @ApiTags('Customer Stock Picks')
@@ -94,12 +95,9 @@ export class CustomerStockPicksController {
       internalFilter,
     );
 
-    return handleSuccessPaginated({
+    return handleSuccessMany({
       data: result.data,
       total: result.total,
-      page: result.page,
-      limit: result.limit,
-      totalPages: result.totalPages,
       message: 'Available stock picks retrieved successfully',
     });
   }
@@ -125,7 +123,7 @@ export class CustomerStockPicksController {
   @ApiResponse({
     status: 200,
     description: 'Customer selections retrieved successfully',
-    type: [CustomerStockPickResponseDto],
+    type: [CustomerMySelectionItemDto],
   })
   async getMySelections(
     @AuthUser() user: JwtPayload,
@@ -136,18 +134,15 @@ export class CustomerStockPicksController {
       throw new ForbiddenException('Only customers can view their selections');
     }
 
-    const result = await this.stockPicksService.getCustomerSelections(
+    const result = await this.stockPicksService.getCustomerSelectionsCards(
       user.sub,
       page,
       limit,
     );
 
-    return handleSuccessPaginated({
+    return handleSuccessMany({
       data: result.data,
       total: result.total,
-      page: result.page,
-      limit: result.limit,
-      totalPages: result.totalPages,
       message: 'Your stock pick selections retrieved successfully',
     });
   }

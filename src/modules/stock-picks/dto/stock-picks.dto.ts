@@ -18,6 +18,7 @@ import {
   StockPickAvailability,
   StockPickRiskLevel,
   StockPickTierLabel,
+  StockPickRecommendation,
 } from '../entities/stock-pick.entity';
 import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
 import { CustomerPickStatus } from '../entities/customer-stock-pick.entity';
@@ -36,6 +37,16 @@ export class CreateStockPickDto {
     typeof value === 'string' ? value.toUpperCase() : (value as string),
   )
   stock_symbol: string;
+
+  @ApiPropertyOptional({
+    description: 'Company name',
+    example: 'Microsoft Corp.',
+    maxLength: 150,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  company?: string;
 
   @ApiProperty({
     description: 'Description of the stock pick for customers',
@@ -107,6 +118,14 @@ export class CreateStockPickDto {
   @IsOptional()
   @IsEnum(StockPickRiskLevel)
   risk_level?: StockPickRiskLevel;
+
+  @ApiPropertyOptional({
+    description: 'Recommendation',
+    enum: StockPickRecommendation,
+  })
+  @IsOptional()
+  @IsEnum(StockPickRecommendation)
+  recommendation?: StockPickRecommendation;
 
   @ApiPropertyOptional({
     description: 'Expected minimum return percentage (0-100)',
@@ -218,6 +237,12 @@ export class UpdateStockPickDto {
   @MaxLength(500)
   description?: string;
 
+  @ApiPropertyOptional({ description: 'Updated company name', maxLength: 150 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  company?: string;
+
   @ApiPropertyOptional({
     description: 'Updated status',
     enum: StockPickStatus,
@@ -274,6 +299,14 @@ export class UpdateStockPickDto {
   @IsOptional()
   @IsEnum(StockPickRiskLevel)
   risk_level?: StockPickRiskLevel;
+
+  @ApiPropertyOptional({
+    description: 'Updated recommendation',
+    enum: StockPickRecommendation,
+  })
+  @IsOptional()
+  @IsEnum(StockPickRecommendation)
+  recommendation?: StockPickRecommendation;
 
   @ApiPropertyOptional({
     description: 'Updated expected min return %',
@@ -665,6 +698,9 @@ export class StockPickResponseDto {
   @ApiProperty({ description: 'Stock symbol' })
   stock_symbol: string;
 
+  @ApiPropertyOptional({ description: 'Company name' })
+  company?: string;
+
   @ApiProperty({ description: 'Description of the stock pick' })
   description: string;
 
@@ -691,6 +727,12 @@ export class StockPickResponseDto {
 
   @ApiProperty({ description: 'Sale price for customers' })
   sale_price: number;
+
+  @ApiPropertyOptional({
+    description: 'Recommendation',
+    enum: StockPickRecommendation,
+  })
+  recommendation?: StockPickRecommendation;
 
   @ApiPropertyOptional({ description: 'Risk level', enum: StockPickRiskLevel })
   risk_level?: StockPickRiskLevel;
@@ -818,6 +860,14 @@ export class CustomerViewStockPickDto {
   @ApiProperty({ description: 'Sale price for customers' })
   sale_price: number;
 
+  @ApiPropertyOptional({ description: 'Company name' })
+  company?: string;
+
+  @ApiPropertyOptional({
+    description: 'Recommendation',
+    enum: StockPickRecommendation,
+  })
+  recommendation?: StockPickRecommendation;
   @ApiPropertyOptional({ description: 'Risk level', enum: StockPickRiskLevel })
   risk_level?: StockPickRiskLevel;
 
@@ -864,4 +914,50 @@ export class CustomerViewStockPickDto {
       'Whether the authenticated customer has an active (non-rejected) selection for this pick',
   })
   is_selected: boolean;
+}
+
+// Response DTO for my-selections route (user-friendly card data)
+export class CustomerMySelectionItemDto {
+  @ApiProperty({ description: 'Display id for the selection (string)' })
+  id: string;
+
+  @ApiProperty({
+    description: 'Selection date formatted (e.g., December 18, 2024)',
+  })
+  date: string;
+
+  @ApiPropertyOptional({ description: 'Stock symbol (e.g., MSFT)' })
+  stock?: string;
+
+  @ApiPropertyOptional({ description: 'Company name' })
+  company?: string;
+
+  @ApiPropertyOptional({ description: 'Formatted buy price (e.g., $420.30)' })
+  buyPrice?: string;
+
+  @ApiPropertyOptional({
+    description: 'Formatted current price (e.g., $435.80)',
+  })
+  currentPrice?: string;
+
+  @ApiPropertyOptional({
+    description: 'Formatted change with sign and % (e.g., +3.7%)',
+  })
+  change?: string;
+
+  @ApiPropertyOptional({ description: 'True if change is positive or zero' })
+  isPositive?: boolean;
+
+  @ApiPropertyOptional({ description: 'Status label (Active/Inactive)' })
+  status?: string;
+
+  @ApiPropertyOptional({
+    description: 'Recommendation label (e.g., Buy, Hold)',
+  })
+  recommendation?: string;
+
+  @ApiPropertyOptional({
+    description: 'Risk level label (e.g., Low, Medium, High)',
+  })
+  risk_level?: string;
 }

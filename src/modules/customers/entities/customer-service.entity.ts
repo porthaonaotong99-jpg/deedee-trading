@@ -66,6 +66,10 @@ export class CustomerService {
   })
   subscription_fee: number | null;
 
+  // Link to the selected subscription package
+  @Column({ type: 'uuid', nullable: true })
+  subscription_package_id: string | null;
+
   @Column({
     type: 'decimal',
     precision: 15,

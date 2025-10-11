@@ -34,6 +34,13 @@ export enum StockPickTierLabel {
   ELITE = 'elite',
 }
 
+export enum StockPickRecommendation {
+  BUY = 'buy',
+  HOLD = 'hold',
+  STRONG_BUY = 'strong_buy',
+  SELL = 'sell',
+}
+
 @Entity('stock_picks')
 export class StockPick {
   @PrimaryGeneratedColumn('uuid')
@@ -41,6 +48,9 @@ export class StockPick {
 
   @Column({ type: 'varchar', length: 20 })
   stock_symbol: string;
+
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  company: string | null;
 
   @Column({ type: 'text' })
   description: string;
@@ -61,6 +71,9 @@ export class StockPick {
 
   @Column({ type: 'enum', enum: CustomerServiceType })
   service_type: CustomerServiceType;
+
+  @Column({ type: 'enum', enum: StockPickRecommendation, nullable: true })
+  recommendation: StockPickRecommendation | null;
 
   @Column({ type: 'uuid' })
   created_by_admin_id: string;
