@@ -24,7 +24,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
-  handleSuccessMany,
+  handleSuccessPaginated,
   handleSuccessOne,
 } from '../../common/utils/response.util';
 
@@ -62,17 +62,14 @@ export class UsersController {
   @ApiQuery({ name: 'limit', required: false })
   async findAll(@Query() query: PaginationQueryDto) {
     const result = await this.service.findAll(query);
-    const base = handleSuccessMany({
+    return handleSuccessPaginated({
       data: result.data,
       total: result.total,
-      message: 'Users fetched',
-    });
-    return {
-      ...base,
       page: result.page,
       limit: result.limit,
       totalPages: result.totalPages,
-    };
+      message: 'Users fetched',
+    });
   }
 
   @Get(':id')

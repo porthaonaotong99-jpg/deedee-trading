@@ -32,7 +32,7 @@ import { AuthUser } from '../../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../../common/interfaces';
 import {
   handleSuccessOne,
-  handleSuccessMany,
+  handleSuccessPaginated,
 } from '../../../common/utils/response.util';
 
 @ApiTags('Customer Stock Picks')
@@ -95,9 +95,12 @@ export class CustomerStockPicksController {
       internalFilter,
     );
 
-    return handleSuccessMany({
+    return handleSuccessPaginated({
       data: result.data,
       total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
       message: 'Available stock picks retrieved successfully',
     });
   }
@@ -120,6 +123,20 @@ export class CustomerStockPicksController {
     type: Number,
     description: 'Items per page',
   })
+  @ApiQuery({
+    name: 'start_date',
+    required: false,
+    type: String,
+    description:
+      'Filter by approved_at start date (inclusive). Format: YYYY-MM-DD or ISO',
+  })
+  @ApiQuery({
+    name: 'end_date',
+    required: false,
+    type: String,
+    description:
+      'Filter by approved_at end date (inclusive). Format: YYYY-MM-DD or ISO',
+  })
   @ApiResponse({
     status: 200,
     description: 'Customer selections retrieved successfully',
@@ -129,20 +146,31 @@ export class CustomerStockPicksController {
     @AuthUser() user: JwtPayload,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @Query('start_date') start_date?: string,
+    @Query('end_date') end_date?: string,
   ) {
     if (user.type !== 'customer') {
       throw new ForbiddenException('Only customers can view their selections');
     }
 
+    // Parse optional date range for approved_at
+    const parsedStart = start_date ? new Date(start_date) : undefined;
+    const parsedEnd = end_date ? new Date(end_date) : undefined;
+
     const result = await this.stockPicksService.getCustomerSelectionsCards(
       user.sub,
       page,
       limit,
+      parsedStart,
+      parsedEnd,
     );
 
-    return handleSuccessMany({
+    return handleSuccessPaginated({
       data: result.data,
       total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
       message: 'Your stock pick selections retrieved successfully',
     });
   }

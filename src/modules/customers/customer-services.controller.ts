@@ -42,7 +42,7 @@ import {
 } from '../../common/enums';
 import {
   handleSuccessOne,
-  handleSuccessMany,
+  handleSuccessPaginated,
 } from '../../common/utils/response.util';
 import {
   ServiceApplyRequestExamples,
@@ -568,17 +568,14 @@ export class CustomerServicesController {
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
     });
-    const base = handleSuccessMany({
+    return handleSuccessPaginated({
       data: result.data,
       total: result.total,
-      message: 'Pending premium membership applications retrieved',
-    });
-    return {
-      ...base,
       page: result.page,
       limit: result.limit,
       totalPages: result.totalPages,
-    };
+      message: 'Pending premium membership applications retrieved',
+    });
   }
 
   @Get('payments/history')
@@ -640,18 +637,15 @@ export class CustomerServicesController {
       startDate: parsedStart,
       endDate: parsedEnd,
     });
-    const base = handleSuccessMany({
+    const totalPages = Math.ceil(res.total / effectiveLimit) || 1;
+    return handleSuccessPaginated({
       data: res.payments,
       total: res.total,
-      message: 'Payment history retrieved',
-    });
-    const totalPages = Math.ceil(res.total / effectiveLimit) || 1;
-    return {
-      ...base,
       page: parsedPage,
       limit: effectiveLimit,
       totalPages,
-    };
+      message: 'Payment history retrieved',
+    });
   }
 
   @Get('admin/payments/audit')

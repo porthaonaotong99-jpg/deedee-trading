@@ -28,9 +28,9 @@ import { Permissions } from '../../common/decorators/permissions.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
   handleSuccessOne,
-  handleSuccessMany,
+  handleSuccessPaginated,
   IOneResponse,
-  IManyResponse,
+  IPaginatedResponse,
 } from '../../common/utils/response.util';
 
 @ApiTags('invest-types')
@@ -64,21 +64,16 @@ export class InvestTypesController {
   @ApiResponse({ status: 200, description: 'List returned' })
   async findAll(
     @Query() query: PaginationQueryDto,
-  ): Promise<
-    IManyResponse<any> & { page: number; limit: number; totalPages: number }
-  > {
+  ): Promise<IPaginatedResponse<any>> {
     const result = await this.service.findAll(query);
-    const base = handleSuccessMany({
+    return handleSuccessPaginated({
       data: result.data,
       total: result.total,
-      message: 'InvestTypes fetched',
-    });
-    return {
-      ...base,
       page: result.page,
       limit: result.limit,
       totalPages: result.totalPages,
-    };
+      message: 'InvestTypes fetched',
+    });
   }
 
   @Get(':id')

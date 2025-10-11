@@ -30,8 +30,9 @@ import { AuthUser } from '../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../common/interfaces';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
-  handleSuccessMany,
+  handleSuccessPaginated,
   handleSuccessOne,
+  IPaginatedResponse,
 } from '../../common/utils/response.util';
 import {
   ForgotPasswordDto,
@@ -79,19 +80,18 @@ export class CustomersController {
   @ApiOperation({ summary: 'List customers (paginated) [staff only]' })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
-  async findAll(@Query() query: PaginationQueryDto) {
+  async findAll(
+    @Query() query: PaginationQueryDto,
+  ): Promise<IPaginatedResponse<any>> {
     const result = await this.service.findAll(query);
-    const base = handleSuccessMany({
+    return handleSuccessPaginated({
       data: result.data,
       total: result.total,
-      message: 'Customers fetched',
-    });
-    return {
-      ...base,
       page: result.page,
       limit: result.limit,
       totalPages: result.totalPages,
-    };
+      message: 'Customers fetched',
+    });
   }
 
   @Get(':id')

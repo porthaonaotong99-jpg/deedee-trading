@@ -28,7 +28,7 @@ import { Permissions } from '../../common/decorators/permissions.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
   handleSuccessOne,
-  handleSuccessMany,
+  handleSuccessPaginated,
   IOneResponse,
   IManyResponse,
 } from '../../common/utils/response.util';
@@ -67,17 +67,14 @@ export class StockCategoriesController {
     IManyResponse<any> & { page: number; limit: number; totalPages: number }
   > {
     const result = await this.service.findAll(query);
-    const base = handleSuccessMany({
+    return handleSuccessPaginated({
       data: result.data,
       total: result.total,
-      message: 'StockCategories fetched',
-    });
-    return {
-      ...base,
       page: result.page,
       limit: result.limit,
       totalPages: result.totalPages,
-    };
+      message: 'StockCategories fetched',
+    });
   }
 
   @Get(':id')

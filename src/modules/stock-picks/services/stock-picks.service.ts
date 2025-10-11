@@ -289,6 +289,8 @@ export class StockPicksService {
     customerId: string,
     page = 1,
     limit = 10,
+    startDate?: Date,
+    endDate?: Date,
   ): Promise<PaginatedResult<CustomerMySelectionItemDto>> {
     const {
       page: validPage,
@@ -301,13 +303,31 @@ export class StockPicksService {
       maxLimit: 50,
     });
 
-    const [data, total] = await this.customerPickRepo.findAndCount({
-      where: { customer_id: customerId },
-      order: { selected_at: 'DESC' },
-      skip,
-      take: validLimit,
-      relations: ['stock_pick'],
-    });
+    // Use query builder to support approved_at range filtering
+    const qb = this.customerPickRepo
+      .createQueryBuilder('cp')
+      .leftJoinAndSelect('cp.stock_pick', 'sp')
+      .where('cp.customer_id = :cid', { cid: customerId });
+
+    if (startDate || endDate) {
+      // When filtering by approved_at, only consider approved picks
+      qb.andWhere('cp.status = :approved', {
+        approved: CustomerPickStatus.APPROVED,
+      });
+      if (startDate) {
+        qb.andWhere('cp.approved_at >= :startDate', { startDate });
+      }
+      if (endDate) {
+        qb.andWhere('cp.approved_at <= :endDate', { endDate });
+      }
+      qb.orderBy('cp.approved_at', 'DESC');
+    } else {
+      qb.orderBy('cp.selected_at', 'DESC');
+    }
+
+    qb.skip(skip).take(validLimit);
+
+    const [data, total] = await qb.getManyAndCount();
 
     const mappedData = data.map((pick) =>
       this.mapToCustomerMySelectionItem(pick),

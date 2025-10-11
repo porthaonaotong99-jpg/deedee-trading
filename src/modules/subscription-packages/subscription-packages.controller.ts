@@ -5,7 +5,7 @@ import {
   SubscriptionPackageFilterDto,
   SubscriptionPackageResponseDto,
 } from './dto/subscription-packages.dto';
-import { handleSuccessMany } from '../../common/utils/response.util';
+import { handleSuccessPaginated } from '../../common/utils/response.util';
 import type { JwtPayload } from '../../common/interfaces';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -117,16 +117,13 @@ export class SubscriptionPackagesController {
       });
     }
 
-    const base = handleSuccessMany({
+    return handleSuccessPaginated({
       data: enriched,
       total: result.total,
-      message: 'Subscription packages retrieved successfully',
-    });
-    return {
-      ...base,
       page: result.page,
       limit: result.limit,
       totalPages: result.totalPages,
-    };
+      message: 'Subscription packages retrieved successfully',
+    });
   }
 }

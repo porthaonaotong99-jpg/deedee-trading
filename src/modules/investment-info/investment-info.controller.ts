@@ -21,7 +21,7 @@ import { InvestmentInfoService } from './investment-info.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { AuthUser } from '../../common/decorators/auth-user.decorator';
-import { handleSuccessMany } from '../../common/utils/response.util';
+import { handleSuccessPaginated } from '../../common/utils/response.util';
 import type { JwtPayload } from '../../common/interfaces';
 
 class ApproveInvestmentDto {
@@ -84,17 +84,14 @@ export class InvestmentInfoController {
       page: query.page ? Number(query.page) : undefined,
       limit: query.limit ? Number(query.limit) : undefined,
     });
-    const base = handleSuccessMany({
+    return handleSuccessPaginated({
       data: result.data,
       total: result.total,
-      message: 'Guaranteed returns investments fetched',
-    });
-    return {
-      ...base,
       page: result.page,
       limit: result.limit,
       totalPages: result.totalPages,
-    };
+      message: 'Guaranteed returns investments fetched',
+    });
   }
 
   @Post('guaranteed-returns')

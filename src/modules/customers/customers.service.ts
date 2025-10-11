@@ -1789,7 +1789,7 @@ export class CustomersService {
           subscription_duration: duration,
           subscription_package_id: packageId,
           subscription_expires_at: null,
-          active: false,
+          // active: false,
         } as CustomerService;
       }
 

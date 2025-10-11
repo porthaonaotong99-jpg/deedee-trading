@@ -43,9 +43,9 @@ import {
 } from './dto/stock.dto';
 import {
   handleSuccessOne,
-  handleSuccessMany,
+  handleSuccessPaginated,
   IOneResponse,
-  IManyResponse,
+  IPaginatedResponse,
 } from '../../common/utils/response.util';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -94,25 +94,18 @@ export class StocksController {
     description: 'Paginated list returned',
     schema: { example: StocksListResponseExample },
   })
-  async findAll(@Query() query: PaginationOptions): Promise<
-    IManyResponse<StockResponseDto> & {
-      page: number;
-      limit: number;
-      totalPages: number;
-    }
-  > {
+  async findAll(
+    @Query() query: PaginationOptions,
+  ): Promise<IPaginatedResponse<StockResponseDto>> {
     const result = await this.stocksService.findAll(query);
-    const base = handleSuccessMany<StockResponseDto>({
+    return handleSuccessPaginated<StockResponseDto>({
       data: result.data,
       total: result.total,
-      message: 'Stocks fetched',
-    });
-    return {
-      ...base,
       page: result.page,
       limit: result.limit,
       totalPages: result.totalPages,
-    };
+      message: 'Stocks fetched',
+    });
   }
 
   @Get(':id')
