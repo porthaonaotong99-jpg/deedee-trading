@@ -49,7 +49,10 @@ export class Stock {
 
   // Company Information
   @Column({ type: 'varchar', length: 500, nullable: true })
-  company_name: string;
+  company: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  country: string;
 
   @Column({ type: 'varchar', length: 1000, nullable: true })
   description: string;

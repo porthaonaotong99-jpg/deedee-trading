@@ -1,15 +1,14 @@
-import {
-  Controller,
-  Get,
-  Param,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { Controller, Get, Param } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
   ExternalPriceFetcherService,
   ExternalQuote,
 } from './services/external-price-fetcher.service';
 import { RealTimePriceService } from './services/real-time-price.service';
+import {
+  handleError,
+  handleSuccessOne,
+} from '../../common/utils/response.util';
 
 @ApiTags('stock-quotes')
 @Controller('stocks')
@@ -44,62 +43,87 @@ export class StockQuotesController {
   })
   async getQuote(@Param('symbol') symbol: string) {
     const sym = symbol.toUpperCase();
-    // Fetch external quote first. We only persist if quote is valid.
-    const quote: ExternalQuote | null = await this.fetcher.fetchQuote(sym);
+    try {
+      // Fetch external quote first. We only persist if quote is valid.
+      const quote: ExternalQuote | null = await this.fetcher.fetchQuote(sym);
+      console.log({ quote });
+      if (!quote) {
+        return handleError({
+          code: 'NO_QUOTE',
+          message: 'No free provider returned a quote at this time',
+          error: { symbol: sym },
+          statusCode: 503,
+        });
+      }
 
-    if (!quote) {
-      throw new ServiceUnavailableException({
+      // Persist quote (auto) regardless of save flag; legacy ?save kept for backwards compatibility
+      const previousClose = quote.previousClose ?? quote.price;
+      const change = quote.price - previousClose;
+      const changePercent = previousClose ? (change / previousClose) * 100 : 0;
+
+      await this.realTime.updatePrice(sym, {
         symbol: sym,
-        error: 'NO_QUOTE',
-        message: 'No free provider returned a quote at this time',
-        disclaimer:
-          'Data unavailable from free providers right now. Try again shortly.',
+        price: quote.price,
+        change: Math.round(change * 100) / 100,
+        changePercent: Math.round(changePercent * 100) / 100,
+        volume: quote.volume ?? 0,
+        bidPrice: quote.bid,
+        askPrice: quote.ask,
+        bidSize: quote.bidSize,
+        askSize: quote.askSize,
+        high: quote.high ?? quote.price,
+        low: quote.low ?? quote.price,
+        open: quote.open ?? quote.price,
+        previousClose: previousClose,
+        source: 'EXTERNAL',
+        provider: quote.provider,
+      });
+
+      // Enrich metadata and fetch stock row (company name, country, category)
+      await this.realTime.ensureSymbol(sym);
+      const stockWithCat = await this.realTime.getStockWithCategory(sym);
+
+      // Helpers to format big numbers
+      const fmtVolume = (v?: number | null) => {
+        if (!v && v !== 0) return null;
+        if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)}B`;
+        if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+        if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+        return String(v);
+      };
+      const fmtMarketCap = (v?: number | null) => {
+        if (!v && v !== 0) return null;
+        if (v >= 1_000_000_000_000)
+          return `${(v / 1_000_000_000_000).toFixed(1)}T`;
+        if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)}B`;
+        if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+        return String(v);
+      };
+
+      const payload = {
+        symbol: quote.symbol,
+        name: stockWithCat?.company || stockWithCat?.name || sym,
+        price: quote.price,
+        change: Math.round(change * 100) / 100,
+        changePercent: Math.round(changePercent * 100) / 100,
+        market: stockWithCat?.exchange || 'SMART',
+        country: stockWithCat?.country || null,
+        marketCap: fmtMarketCap(stockWithCat?.market_cap ?? null),
+        pe: stockWithCat?.pe_ratio ?? null,
+        volume: fmtVolume(quote.volume ?? stockWithCat?.volume ?? null),
+      };
+
+      return handleSuccessOne({
+        data: payload,
+        message: 'Normalized quote returned',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'QUOTE_ERROR',
+        message: 'Failed to retrieve or persist quote',
+        error,
+        statusCode: 500,
       });
     }
-
-    // Persist quote (auto) regardless of save flag; legacy ?save kept for backwards compatibility
-    const previousClose = quote.previousClose ?? quote.price;
-    const change = quote.price - previousClose;
-    const changePercent = previousClose ? (change / previousClose) * 100 : 0;
-
-    await this.realTime.updatePrice(sym, {
-      symbol: sym,
-      price: quote.price,
-      change: Math.round(change * 100) / 100,
-      changePercent: Math.round(changePercent * 100) / 100,
-      volume: quote.volume ?? 0,
-      bidPrice: quote.bid,
-      askPrice: quote.ask,
-      bidSize: quote.bidSize,
-      askSize: quote.askSize,
-      high: quote.high ?? quote.price,
-      low: quote.low ?? quote.price,
-      open: quote.open ?? quote.price,
-      previousClose: previousClose,
-      source: 'EXTERNAL',
-      provider: quote.provider,
-    });
-
-    // Now fetch enriched stock + category (lazy classification may be triggered inside)
-    const stockWithCat = await this.realTime.getStockWithCategory(sym);
-
-    return {
-      symbol: quote.symbol,
-      price: quote.price,
-      open: quote.open ?? null,
-      high: quote.high ?? null,
-      low: quote.low ?? null,
-      previousClose: previousClose,
-      change: Math.round(change * 100) / 100,
-      changePercent: Math.round(changePercent * 100) / 100,
-      volume: quote.volume ?? null,
-      provider: quote.provider,
-      timestamp: quote.timestamp,
-      categoryId: stockWithCat?.categoryId || null,
-      categoryName: stockWithCat?.categoryName || null,
-      disclaimer:
-        'Data may be delayed and is provided for informational purposes only.',
-      persisted: true,
-    };
   }
 }

@@ -113,6 +113,13 @@ export class InvestmentRequest {
   @Column({ type: 'int', nullable: true })
   approved_term_months: number | null;
 
+  @Column({
+    type: 'uuid',
+    nullable: true,
+    comment: 'Linked interest_rate_configurations.id used for approval',
+  })
+  approved_interest_config_id: string | null;
+
   @Column({ type: 'text', nullable: true })
   admin_notes: string | null;
 

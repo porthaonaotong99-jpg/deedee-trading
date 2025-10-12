@@ -1,7 +1,7 @@
 # Transaction Management Implementation Summary
 
 ## Overview
-The `UpdatedInvestmentService` has been completely refactored to use proper database transactions with rollback capabilities for all critical operations. This ensures data consistency and prevents partial updates that could corrupt the system state.
+The `InvestmentService` has been completely refactored to use proper database transactions with rollback capabilities for all critical operations. This ensures data consistency and prevents partial updates that could corrupt the system state.
 
 ## 🔒 Transaction-Protected Flows
 

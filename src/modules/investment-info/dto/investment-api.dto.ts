@@ -19,20 +19,6 @@ import { ReturnRequestType } from '../entities/investment-transaction.entity';
 
 export class CreateInvestmentRequestDto {
   @ApiProperty({
-    description: 'Customer ID (automatically filled from JWT token)',
-    example: 'customer-uuid-123',
-  })
-  @IsString()
-  customer_id: string;
-
-  @ApiProperty({
-    description: 'Service ID for guaranteed returns service',
-    example: 'service-uuid-456',
-  })
-  @IsString()
-  service_id: string;
-
-  @ApiProperty({
     description: 'Investment amount in USD',
     example: 75000,
     minimum: 10000,
@@ -136,43 +122,8 @@ export class CreateReturnRequestDto {
 
 export class ApproveInvestmentDto {
   @ApiProperty({
-    description: 'Whether to use automatically calculated interest rate',
-    example: true,
-    default: true,
-    required: false,
-  })
-  @IsOptional()
-  @IsBoolean()
-  use_calculated_rate?: boolean;
-
-  @ApiProperty({
-    description: 'Custom interest rate (only if not using calculated rate)',
-    example: 0.22,
-    minimum: 0,
-    maximum: 1,
-    required: false,
-  })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @Max(1)
-  custom_interest_rate?: number;
-
-  @ApiProperty({
-    description: 'Investment term in months',
-    example: 12,
-    minimum: 1,
-    maximum: 60,
-    required: false,
-  })
-  @IsOptional()
-  @IsNumber()
-  @Min(1)
-  @Max(60)
-  term_months?: number;
-
-  @ApiProperty({
-    description: 'Admin notes for the approval',
+    description:
+      'Admin notes for the approval. Interest rate and term are derived automatically from the customer request and interest_rate_configurations.',
     example: 'Approved after reviewing payment slip and customer history',
     required: false,
   })

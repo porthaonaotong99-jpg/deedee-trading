@@ -8,6 +8,7 @@ import {
 } from './entities/interest-rate-configuration.entity';
 
 export interface InterestRateCalculationResult {
+  config_id: string;
   tier_name: string;
   risk_tolerance: string;
   base_rate: number;
@@ -74,6 +75,7 @@ export class DatabaseInterestRateService {
         const finalRate = baseRate + riskAdj;
 
         return {
+          config_id: config.id,
           tier_name: config.tier_name,
           risk_tolerance: config.risk_tolerance,
           base_rate: baseRate,

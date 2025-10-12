@@ -32,7 +32,7 @@ import { RiskTolerance } from './entities/interest-rate-configuration.entity';
 // Updated DTOs to include form fields
 interface CreateInvestmentRequestDto {
   customer_id: string;
-  service_id: string;
+  service_id?: string;
   amount: number;
   payment_slip_url: string;
   payment_date?: Date;
@@ -52,7 +52,7 @@ interface CreateReturnRequestDto {
 }
 
 @Injectable()
-export class UpdatedInvestmentService {
+export class InvestmentService {
   constructor(
     @InjectRepository(InvestmentRequest)
     private readonly requestRepo: Repository<InvestmentRequest>,
@@ -126,6 +126,7 @@ export class UpdatedInvestmentService {
         // Auto-calculated tier information from database
         calculated_tier: interestRateResult.tier_name,
         calculated_interest_rate: interestRateResult.final_rate.toString(),
+        approved_interest_config_id: interestRateResult.config_id,
         status: InvestmentRequestStatus.PENDING,
       });
 
@@ -160,9 +161,6 @@ export class UpdatedInvestmentService {
     requestId: string,
     adminId: string,
     approvalData: {
-      use_calculated_rate?: boolean; // Use auto-calculated rate or custom
-      custom_interest_rate?: number; // Custom rate if not using calculated
-      term_months?: number;
       admin_notes?: string;
     },
   ) {
@@ -182,21 +180,35 @@ export class UpdatedInvestmentService {
         throw new BadRequestException('Only pending requests can be approved');
       }
 
-      // Determine final interest rate
-      let finalInterestRate: number;
-      if (
-        approvalData.use_calculated_rate !== false &&
-        request.calculated_interest_rate
-      ) {
-        // Use the auto-calculated rate from tier
-        finalInterestRate = Number(request.calculated_interest_rate);
-      } else if (approvalData.custom_interest_rate) {
-        // Use custom rate provided by admin
-        finalInterestRate = approvalData.custom_interest_rate;
-      } else {
-        throw new BadRequestException(
-          'Either use calculated rate or provide custom interest rate',
+      // Determine final interest rate strictly from configuration
+      if (!request.calculated_interest_rate) {
+        throw new BadRequestException('Calculated interest rate is missing');
+      }
+      const finalInterestRate = Number(request.calculated_interest_rate);
+
+      // Resolve linked interest rate configuration id from request
+      // Prefer the config id saved during request creation; otherwise recompute
+      let configId = request.approved_interest_config_id;
+      if (!configId) {
+        const rt = this.parseRiskTolerance(
+          request.requested_risk_tolerance || undefined,
         );
+        const calc =
+          await this.databaseInterestRateService.calculateInterestRate(
+            Number(request.amount),
+            rt,
+          );
+        if (calc?.config_id) {
+          configId = calc.config_id;
+          request.approved_interest_config_id = configId;
+        }
+      }
+
+      // Infer term from requested_investment_period (e.g., "12 months")
+      let inferredTerm: number | null = null;
+      if (request.requested_investment_period) {
+        const match = request.requested_investment_period.match(/(\d+)/);
+        inferredTerm = match ? Number(match[1]) : null;
       }
 
       // Update request
@@ -204,7 +216,8 @@ export class UpdatedInvestmentService {
       request.reviewed_by = adminId;
       request.reviewed_at = new Date();
       request.approved_interest_rate = finalInterestRate.toString();
-      request.approved_term_months = approvalData.term_months || null;
+      request.approved_term_months = inferredTerm;
+      // NOTE: approved_interest_config_id is captured from calculation
       request.admin_notes = approvalData.admin_notes || null;
       await requestRepo.save(request);
 
@@ -221,8 +234,10 @@ export class UpdatedInvestmentService {
         current_principal: request.amount,
         interest_rate: finalInterestRate.toString(),
         investment_start_date: startDate,
-        term_months: approvalData.term_months || null,
+        term_months: inferredTerm,
         created_by: adminId,
+        // Persist the selected interest rate configuration id
+        interest_rate_config_id: configId || null,
       });
       await transactionRepo.save(transaction);
 
@@ -602,6 +617,40 @@ export class UpdatedInvestmentService {
     });
   }
 
+  /**
+   * Fetch the summary strictly from customer_investment_summary table
+   * for the customer's active GUARANTEED_RETURNS service.
+   */
+  async getCustomerSummaryForCustomer(customerId: string) {
+    // Resolve active guaranteed returns service for this customer
+    const service = await this.serviceRepo.findOne({
+      where: {
+        customer_id: customerId,
+        service_type: CustomerServiceType.GUARANTEED_RETURNS,
+        active: true,
+      },
+    });
+
+    if (!service) {
+      throw new NotFoundException(
+        'Active guaranteed returns service not found',
+      );
+    }
+
+    // Return the persisted summary row (no recalculation)
+    const summary = await this.summaryRepo.findOne({
+      where: { customer_id: customerId, service_id: service.id },
+      //   relations: ['customer', 'service'],
+    });
+
+    if (!summary) {
+      // If no row exists yet, return null to indicate no summary persisted
+      return null;
+    }
+
+    return summary;
+  }
+
   async getCustomerInvestments(customerId: string) {
     return this.transactionRepo.find({
       where: {
@@ -728,6 +777,142 @@ export class UpdatedInvestmentService {
       limit: l,
       totalPages: Math.max(1, Math.ceil(total / l)),
     };
+  }
+
+  /**
+   * View-model for customer transactions used by GET my-transactions.
+   * Formats fields and computes duration, maturity, profit, and status.
+   */
+  async getCustomerTransactionsViewPaginated(
+    customerId: string,
+    page?: number,
+    limit?: number,
+    startDate?: Date,
+    endDate?: Date,
+  ) {
+    const {
+      data,
+      total,
+      page: p,
+      limit: l,
+      totalPages,
+    } = await this.getCustomerTransactionsPaginated(
+      customerId,
+      page,
+      limit,
+      startDate,
+      endDate,
+    );
+
+    // Helpers
+    const fmtCurrency = (n: number | null | undefined) =>
+      n == null || Number.isNaN(n)
+        ? '—'
+        : new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          }).format(n);
+    const fmtDate = (d: Date | null | undefined) =>
+      !d
+        ? '—'
+        : new Intl.DateTimeFormat('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          }).format(d);
+    const fmtPercent = (r: number | null | undefined) =>
+      r == null || Number.isNaN(r) ? '—' : `${(r * 100).toFixed(1)}%`;
+    const addMonths = (date: Date, months: number) => {
+      const d = new Date(date.getTime());
+      const day = d.getDate();
+      d.setMonth(d.getMonth() + months);
+      if (d.getDate() < day) d.setDate(0);
+      return d;
+    };
+    const humanizeMonths = (months?: number | null) => {
+      if (!months || months <= 0) return '—';
+      const years = Math.floor(months / 12);
+      const rem = months % 12;
+      const parts: string[] = [];
+      if (years > 0) parts.push(`${years} ${years === 1 ? 'year' : 'years'}`);
+      if (rem > 0) parts.push(`${rem} ${rem === 1 ? 'month' : 'months'}`);
+      return parts.length ? parts.join(' ') : `${months} months`;
+    };
+
+    const view = data.map((tx) => {
+      const id = tx.id;
+      const effDate = tx.effective_date ? new Date(tx.effective_date) : null;
+
+      if (tx.transaction_type === TransactionType.INVESTMENT_APPROVED) {
+        const principal = Number(tx.investment_principal ?? tx.amount ?? 0);
+        const investDate = tx.investment_start_date
+          ? new Date(tx.investment_start_date)
+          : effDate;
+        const termMonths = tx.term_months ?? null;
+        const maturity =
+          investDate && termMonths ? addMonths(investDate, termMonths) : null;
+        const rate = tx.interest_rate != null ? Number(tx.interest_rate) : null;
+        const profit =
+          rate != null && termMonths != null
+            ? principal * rate * (termMonths / 12)
+            : rate != null && termMonths == null
+              ? principal * rate
+              : null;
+
+        let status = 'Active';
+        if (
+          (tx.current_principal && Number(tx.current_principal) <= 0) ||
+          (maturity && maturity <= new Date())
+        ) {
+          status = 'Completed';
+        }
+
+        return {
+          id,
+          amountInvested: fmtCurrency(principal),
+          investDate: fmtDate(investDate),
+          duration: humanizeMonths(termMonths),
+          maturityDate: fmtDate(maturity),
+          totalProfit: fmtCurrency(profit),
+          status,
+          returnRate: fmtPercent(rate ?? undefined),
+        };
+      }
+
+      const amount = Number(tx.amount ?? 0);
+      const statusMap: Record<string, string> = {
+        [TransactionType.RETURN_REQUEST]:
+          tx.return_request_status === ReturnRequestStatus.PAID
+            ? 'Paid'
+            : tx.return_request_status === ReturnRequestStatus.APPROVED
+              ? 'Approved'
+              : tx.return_request_status === ReturnRequestStatus.REJECTED
+                ? 'Rejected'
+                : 'Pending',
+        [TransactionType.RETURN_APPROVED]: 'Approved',
+        [TransactionType.RETURN_PAID]: 'Paid',
+        [TransactionType.INTEREST_PAID]: 'Interest Paid',
+        [TransactionType.PRINCIPAL_RETURNED]: 'Principal Returned',
+        [TransactionType.ADJUSTMENT]: 'Adjustment',
+        [TransactionType.INTEREST_CALCULATED]: 'Interest Accrued',
+      } as Record<string, string>;
+      const derivedStatus = statusMap[tx.transaction_type] || 'Recorded';
+
+      return {
+        id,
+        amountInvested: fmtCurrency(amount),
+        investDate: fmtDate(effDate),
+        duration: '—',
+        maturityDate: '—',
+        totalProfit: '—',
+        status: derivedStatus,
+        returnRate: '—',
+      };
+    });
+
+    return { data: view, total, page: p, limit: l, totalPages };
   }
 
   /**

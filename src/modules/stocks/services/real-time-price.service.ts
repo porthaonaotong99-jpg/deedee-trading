@@ -71,7 +71,10 @@ export class RealTimePriceService {
    * Public helper so controllers can ensure a symbol & category exist without subscribing.
    */
   async ensureSymbol(symbol: string): Promise<void> {
-    await this.ensureStockExists(symbol.toUpperCase());
+    const upper = symbol.toUpperCase();
+    await this.ensureStockExists(upper);
+    // Fire-and-forget enrichment of company name and country
+    void this.enrichCompanyBasics(upper).catch(() => undefined);
   }
 
   /**
@@ -455,11 +458,45 @@ export class RealTimePriceService {
           `assignCategoryIfPossible failed for ${symbol}: ${e instanceof Error ? e.message : e}`,
         ),
       );
+      // Non-blocking enrichment of company basics
+      void this.enrichCompanyBasics(symbol).catch(() => undefined);
     } catch (e) {
       // Ignore duplicate race condition
       this.logger.debug(
         `ensureStockExists race for ${symbol}: ${e instanceof Error ? e.message : e}`,
       );
+    }
+  }
+
+  /**
+   * Enrich stock row with company name and country if available.
+   */
+  private async enrichCompanyBasics(symbol: string): Promise<void> {
+    try {
+      const basics = await this.stockMetadata.getCompanyBasics(symbol);
+      if (!basics) return;
+      const stock = await this.stockRepository.findOne({ where: { symbol } });
+      if (!stock) return;
+      const patch: {
+        company?: string;
+        country?: string;
+        updated_by?: string;
+      } = {};
+      if (basics.name && (!stock.company || stock.company === stock.symbol)) {
+        patch.company = basics.name;
+      }
+      if (basics.country && !stock.country) {
+        patch.country = basics.country;
+      }
+      if (Object.keys(patch).length > 0) {
+        patch.updated_by = this.getSystemUserId();
+        await this.stockRepository.update({ id: stock.id }, patch);
+        this.logger.debug(
+          `Enriched ${symbol} with company basics: ${JSON.stringify(patch)}`,
+        );
+      }
+    } catch {
+      // ignore enrichment failures
     }
   }
 

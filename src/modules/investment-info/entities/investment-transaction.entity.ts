@@ -141,6 +141,13 @@ export class InvestmentTransaction {
   @Column({ type: 'uuid', nullable: true })
   created_by: string | null;
 
+  @Column({
+    type: 'uuid',
+    nullable: true,
+    comment: 'interest_rate_configurations.id applied to this transaction',
+  })
+  interest_rate_config_id: string | null;
+
   @CreateDateColumn()
   @CreateDateColumn()
   created_at: Date;

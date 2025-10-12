@@ -12,7 +12,7 @@ Successfully implemented a comprehensive database-driven interest rate system th
 
 ### Service Layer
 - **DatabaseInterestRateService**: CRUD operations for interest configurations
-- **UpdatedInvestmentService**: Enhanced with database-driven rate calculation
+- **InvestmentService**: Enhanced with database-driven rate calculation
 - **InterestRateAdminController**: Admin management endpoints
 
 ### API Layer

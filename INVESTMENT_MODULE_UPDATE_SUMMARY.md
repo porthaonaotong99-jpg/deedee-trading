@@ -5,7 +5,7 @@ Updated the investment-info module to follow the customer-services.controller.ts
 
 ## 🔄 Updated Architecture
 
-### 1. **new-investment.controller.ts** - Main Investment Controller
+### 1. **investment.controller.ts.ts** - Main Investment Controller
 Updated to follow customer-services pattern with:
 
 #### **Authentication & Authorization**
@@ -67,7 +67,7 @@ POST   /admin/interest-rates/calculate          // Test rate calculation
 POST   /admin/interest-rates/seed-defaults      // Seed default data
 ```
 
-### 3. **updated-investment.service.ts** - Enhanced Service Layer
+### 3. **investment.service.ts** - Enhanced Service Layer
 Already updated with comprehensive transaction management:
 
 #### **Transaction Safety**

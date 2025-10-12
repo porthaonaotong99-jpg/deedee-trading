@@ -117,6 +117,18 @@ export class StockMetadataService {
     }
   }
 
+  /**
+   * Get basic company metadata for a symbol (company name and country) using cached profile lookup.
+   */
+  async getCompanyBasics(symbol: string): Promise<{
+    name?: string;
+    country?: string;
+  } | null> {
+    const profile = await this.fetchFinnhubProfile(symbol);
+    if (!profile) return null;
+    return { name: profile.name, country: profile.country };
+  }
+
   private normalizeCategory(industry?: string): string | null {
     if (!industry) return null;
     const key = industry.toLowerCase();

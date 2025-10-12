@@ -8,11 +8,11 @@ import { InterestRateConfiguration } from './entities/interest-rate-configuratio
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { TransferHistory } from '../transfer-history/entities/transfer-history.entity';
 import { CustomerService } from '../customers/entities/customer-service.entity';
-import { UpdatedInvestmentService } from './updated-investment.service';
 import { InterestTierService } from './interest-tier.service';
 import { DatabaseInterestRateService } from './database-interest-rate.service';
-import { NewInvestmentController } from './new-investment.controller';
 import { InterestRateAdminController } from './interest-rate-admin.controller';
+import { InvestmentService } from './updated-investment.service';
+import { NewInvestmentController } from './investment.controller';
 
 @Module({
   imports: [
@@ -28,13 +28,13 @@ import { InterestRateAdminController } from './interest-rate-admin.controller';
     ScheduleModule.forRoot(),
   ],
   providers: [
-    UpdatedInvestmentService,
+    InvestmentService,
     InterestTierService,
     DatabaseInterestRateService,
   ],
   controllers: [NewInvestmentController, InterestRateAdminController],
   exports: [
-    UpdatedInvestmentService,
+    InvestmentService,
     InterestTierService,
     DatabaseInterestRateService,
   ],

@@ -21,7 +21,6 @@ import {
   ApiQuery,
   ApiExtraModels,
 } from '@nestjs/swagger';
-import { UpdatedInvestmentService } from './updated-investment.service';
 import { InterestTierService } from './interest-tier.service';
 import { JwtCustomerAuthGuard } from '../auth/guards/jwt-customer.guard';
 import { JwtUserAuthGuard } from '../auth/guards/jwt-user.guard';
@@ -40,6 +39,8 @@ import {
   handleSuccessOne,
   handleSuccessPaginated,
 } from '../../common/utils/response.util';
+import { InvestmentService } from './updated-investment.service';
+// transaction enums are no longer used here; logic moved to service
 
 @ApiTags('investment-requests')
 @ApiExtraModels(
@@ -54,7 +55,7 @@ import {
 @Controller('investment-requests')
 export class NewInvestmentController {
   constructor(
-    private readonly investmentService: UpdatedInvestmentService,
+    private readonly investmentService: InvestmentService,
     private readonly tierService: InterestTierService,
   ) {}
 
@@ -75,7 +76,6 @@ export class NewInvestmentController {
         summary: 'Bronze Tier - Low Risk',
         description: 'Small investment with conservative risk preference',
         value: {
-          service_id: 'service-uuid-456',
           amount: 15000,
           payment_slip_url:
             'https://storage.example.com/payment-slips/slip-123.jpg',
@@ -90,7 +90,6 @@ export class NewInvestmentController {
         summary: 'Silver Tier - Medium Risk',
         description: 'Medium investment with moderate risk preference',
         value: {
-          service_id: 'service-uuid-456',
           amount: 75000,
           payment_slip_url:
             'https://storage.example.com/payment-slips/slip-456.jpg',
@@ -105,7 +104,6 @@ export class NewInvestmentController {
         summary: 'Gold Tier - High Risk',
         description: 'Large investment with aggressive risk preference',
         value: {
-          service_id: 'service-uuid-456',
           amount: 150000,
           payment_slip_url:
             'https://storage.example.com/payment-slips/slip-789.jpg',
@@ -183,9 +181,11 @@ export class NewInvestmentController {
       );
     }
 
-    const data = await this.investmentService.getCustomerInvestments(user.sub);
+    const summary = await this.investmentService.getCustomerSummaryForCustomer(
+      user.sub,
+    );
     return handleSuccessOne({
-      data,
+      data: summary,
       message: 'Investment summary retrieved successfully',
     });
   }
@@ -239,11 +239,14 @@ export class NewInvestmentController {
           items: { type: 'object' },
           example: [
             {
-              id: 'txn-uuid-1',
-              transaction_type: 'INVESTMENT_APPROVED',
-              amount: '75000.00',
-              effective_date: '2025-10-12T14:20:00.000Z',
-              description: 'Investment approved - SILVER tier (19.0%)',
+              id: '#INV-ABC123',
+              amountInvested: '$75,000.00',
+              investDate: 'October 12, 2025',
+              duration: '24 months',
+              maturityDate: 'October 12, 2027',
+              totalProfit: '$28,500.00',
+              status: 'Active',
+              returnRate: '19.0%',
             },
           ],
         },
@@ -281,19 +284,24 @@ export class NewInvestmentController {
       const d = new Date(endDateStr);
       if (!isNaN(d.getTime())) endDate = d;
     }
-    const { data, total, totalPages } =
-      await this.investmentService.getCustomerTransactionsPaginated(
-        user.sub,
-        p,
-        l,
-        startDate,
-        endDate,
-      );
-    return handleSuccessPaginated({
-      data,
+    const {
+      data: view,
       total,
-      page: p,
-      limit: l,
+      page: p2,
+      limit: l2,
+      totalPages,
+    } = await this.investmentService.getCustomerTransactionsViewPaginated(
+      user.sub,
+      p,
+      l,
+      startDate,
+      endDate,
+    );
+    return handleSuccessPaginated({
+      data: view,
+      total,
+      page: p2,
+      limit: l2,
       totalPages,
       message: 'Transaction history retrieved successfully',
     });
@@ -453,7 +461,7 @@ export class NewInvestmentController {
   @ApiOperation({
     summary: 'Approve investment request (Admin)',
     description:
-      'Admin approves a pending investment request and creates the investment',
+      "Admin approves a pending investment request and creates the investment. The interest rate and term are derived from the customer's request and current interest_rate_configurations. The only input allowed is optional admin_notes.",
   })
   @ApiParam({
     name: 'id',
@@ -462,7 +470,7 @@ export class NewInvestmentController {
   })
   @ApiBody({
     type: ApproveInvestmentDto,
-    description: 'Investment approval details',
+    description: 'Investment approval details (admin_notes only)',
   })
   @ApiResponse({
     status: 200,

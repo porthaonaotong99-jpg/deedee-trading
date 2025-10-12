@@ -8,12 +8,9 @@ import {
 } from '@nestjs/swagger';
 import { TechnicalIndicatorsService } from '../services/technical-indicators.service';
 import {
-  RSISignal,
-  TechnicalSummary,
-  SupportResistanceAnalysis,
-  MarketMoversResponse,
-  TechnicalAnalysisSummary,
-} from '../services/technical-indicators.types';
+  handleError,
+  handleSuccessOne,
+} from '../../../common/utils/response.util';
 
 @ApiTags('Technical Indicators')
 @Controller('technical-indicators')
@@ -54,22 +51,36 @@ export class TechnicalIndicatorsController {
     @Param('symbol') symbol: string,
     @Query('resolution') resolution = 'D',
     @Query('timeperiod') timeperiod = 14,
-  ): Promise<RSISignal | { error: string }> {
+  ) {
     this.logger.debug(
       `Getting RSI for ${symbol} (${resolution}, ${timeperiod})`,
     );
 
-    const result = await this.technicalIndicatorsService.getRSI(
-      symbol.toUpperCase(),
-      resolution,
-      Number(timeperiod),
-    );
-
-    if (!result) {
-      return { error: `No RSI data available for ${symbol}` };
+    try {
+      const result = await this.technicalIndicatorsService.getRSI(
+        symbol.toUpperCase(),
+        resolution,
+        Number(timeperiod),
+      );
+      if (!result) {
+        return handleError({
+          code: 'NOT_FOUND',
+          message: `No RSI data available for ${symbol}`,
+          statusCode: 404,
+        });
+      }
+      return handleSuccessOne({
+        data: result,
+        message: 'RSI data retrieved successfully',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'RSI_ERROR',
+        message: 'Failed to retrieve RSI data',
+        error,
+        statusCode: 500,
+      });
     }
-
-    return result;
   }
 
   @Get(':symbol/technical-summary')
@@ -100,21 +111,34 @@ export class TechnicalIndicatorsController {
   async getTechnicalSummary(
     @Param('symbol') symbol: string,
     @Query('resolution') resolution = 'D',
-  ): Promise<TechnicalSummary | { error: string }> {
+  ) {
     this.logger.debug(
       `Getting technical summary for ${symbol} (${resolution})`,
     );
-
-    const result = await this.technicalIndicatorsService.getTechnicalSummary(
-      symbol.toUpperCase(),
-      resolution,
-    );
-
-    if (!result) {
-      return { error: `No technical summary available for ${symbol}` };
+    try {
+      const result = await this.technicalIndicatorsService.getTechnicalSummary(
+        symbol.toUpperCase(),
+        resolution,
+      );
+      if (!result) {
+        return handleError({
+          code: 'NOT_FOUND',
+          message: `No technical summary available for ${symbol}`,
+          statusCode: 404,
+        });
+      }
+      return handleSuccessOne({
+        data: result,
+        message: 'Technical summary retrieved successfully',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'SUMMARY_ERROR',
+        message: 'Failed to retrieve technical summary',
+        error,
+        statusCode: 500,
+      });
     }
-
-    return result;
   }
 
   @Get(':symbol/support-resistance')
@@ -136,20 +160,31 @@ export class TechnicalIndicatorsController {
     status: 404,
     description: 'No support/resistance data available for symbol',
   })
-  async getSupportResistance(
-    @Param('symbol') symbol: string,
-  ): Promise<SupportResistanceAnalysis | { error: string }> {
+  async getSupportResistance(@Param('symbol') symbol: string) {
     this.logger.debug(`Getting support/resistance for ${symbol}`);
-
-    const result = await this.technicalIndicatorsService.getSupportResistance(
-      symbol.toUpperCase(),
-    );
-
-    if (!result) {
-      return { error: `No support/resistance data available for ${symbol}` };
+    try {
+      const result = await this.technicalIndicatorsService.getSupportResistance(
+        symbol.toUpperCase(),
+      );
+      if (!result) {
+        return handleError({
+          code: 'NOT_FOUND',
+          message: `No support/resistance data available for ${symbol}`,
+          statusCode: 404,
+        });
+      }
+      return handleSuccessOne({
+        data: result,
+        message: 'Support/resistance data retrieved successfully',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'SR_ERROR',
+        message: 'Failed to retrieve support/resistance data',
+        error,
+        statusCode: 500,
+      });
     }
-
-    return result;
   }
 
   @Get('market-movers')
@@ -163,16 +198,29 @@ export class TechnicalIndicatorsController {
     description: 'Market movers retrieved successfully',
   })
   @ApiResponse({ status: 500, description: 'Failed to retrieve market movers' })
-  async getMarketMovers(): Promise<MarketMoversResponse | { error: string }> {
+  async getMarketMovers() {
     this.logger.debug('Getting market movers');
-
-    const result = await this.technicalIndicatorsService.getMarketMovers();
-
-    if (!result) {
-      return { error: 'Failed to retrieve market movers' };
+    try {
+      const result = await this.technicalIndicatorsService.getMarketMovers();
+      if (!result) {
+        return handleError({
+          code: 'NOT_AVAILABLE',
+          message: 'Failed to retrieve market movers',
+          statusCode: 500,
+        });
+      }
+      return handleSuccessOne({
+        data: result,
+        message: 'Market movers retrieved successfully',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'MOVERS_ERROR',
+        message: 'Failed to retrieve market movers',
+        error,
+        statusCode: 500,
+      });
     }
-
-    return result;
   }
 
   @Get(':symbol/comprehensive-summary')
@@ -194,21 +242,32 @@ export class TechnicalIndicatorsController {
     status: 404,
     description: 'No technical data available for symbol',
   })
-  async getComprehensiveSummary(
-    @Param('symbol') symbol: string,
-  ): Promise<TechnicalAnalysisSummary | { error: string }> {
+  async getComprehensiveSummary(@Param('symbol') symbol: string) {
     this.logger.debug(`Getting comprehensive summary for ${symbol}`);
-
-    const result =
-      await this.technicalIndicatorsService.getComprehensiveSummary(
-        symbol.toUpperCase(),
-      );
-
-    if (!result) {
-      return { error: `No technical data available for ${symbol}` };
+    try {
+      const result =
+        await this.technicalIndicatorsService.getComprehensiveSummary(
+          symbol.toUpperCase(),
+        );
+      if (!result) {
+        return handleError({
+          code: 'NOT_FOUND',
+          message: `No technical data available for ${symbol}`,
+          statusCode: 404,
+        });
+      }
+      return handleSuccessOne({
+        data: result,
+        message: 'Comprehensive summary retrieved successfully',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'COMP_SUMMARY_ERROR',
+        message: 'Failed to retrieve comprehensive summary',
+        error,
+        statusCode: 500,
+      });
     }
-
-    return result;
   }
 
   @Get('health-check')
@@ -218,38 +277,38 @@ export class TechnicalIndicatorsController {
   })
   @ApiResponse({ status: 200, description: 'Service is healthy' })
   @ApiResponse({ status: 503, description: 'Service is not available' })
-  async healthCheck(): Promise<{
-    status: string;
-    message: string;
-    timestamp: Date;
-  }> {
+  async healthCheck() {
     const finnhubKey = process.env.FINNHUB_KEY;
 
     if (!finnhubKey) {
-      return {
-        status: 'unhealthy',
+      return handleError({
+        code: 'UNHEALTHY',
         message: 'FINNHUB_KEY environment variable is not set',
-        timestamp: new Date(),
-      };
+        statusCode: 503,
+      });
     }
 
     // Test with a simple API call
     try {
       const testResult = await this.technicalIndicatorsService.getRSI('AAPL');
 
-      return {
-        status: 'healthy',
-        message: testResult
-          ? 'Finnhub API accessible and working'
-          : 'Finnhub API accessible but no data returned',
-        timestamp: new Date(),
-      };
+      return handleSuccessOne({
+        data: {
+          status: 'healthy',
+          message: testResult
+            ? 'Finnhub API accessible and working'
+            : 'Finnhub API accessible but no data returned',
+          timestamp: new Date(),
+        },
+        message: 'Service is healthy',
+      });
     } catch (error) {
-      return {
-        status: 'unhealthy',
+      return handleError({
+        code: 'UNHEALTHY',
         message: `Finnhub API error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        timestamp: new Date(),
-      };
+        error,
+        statusCode: 503,
+      });
     }
   }
 }

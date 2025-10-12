@@ -267,6 +267,7 @@ export class ExternalPriceFetcherService {
       try {
         this.logger.debug(`[${symbol}] Trying provider: ${provider}`);
         const quote = await this.fetchFromProvider(provider, symbol);
+        console.log({ quote });
         if (quote) {
           this.logger.debug(
             `[${symbol}] SUCCESS from ${provider}: $${quote.price}`,
@@ -396,6 +397,7 @@ export class ExternalPriceFetcherService {
     } catch {
       return null;
     }
+    console.log({ res });
     if (!res.ok) {
       if (res.status === 403) {
         this.logger.debug(
