@@ -423,6 +423,13 @@ export class StockPicksService {
         payment_reference: paymentSlipDto.payment_reference || null,
         customer_notes: paymentSlipDto.payment_notes || null,
         payment_submitted_at: new Date(),
+        // Capture snapshot price at selection/submission time
+        selected_price:
+          typeof stockPick.current_price === 'number'
+            ? stockPick.current_price
+            : stockPick.current_price !== null
+              ? Number(stockPick.current_price)
+              : null,
         selected_at: new Date(),
       });
       const saved = await customerPickRepo.save(pickEntity);
@@ -692,7 +699,10 @@ export class StockPicksService {
       const n = typeof v === 'number' ? v : Number(v);
       return Number.isFinite(n) ? n : undefined;
     };
-    const targetPrice = toNum(customerPick.stock_pick?.target_price);
+    // Use snapshot selected_price if available, else fall back to target_price
+    const targetPrice =
+      toNum((customerPick as any).selected_price) ??
+      toNum(customerPick.stock_pick?.target_price);
     const currentPrice = toNum(customerPick.stock_pick?.current_price);
     let changePercent: number | undefined = undefined;
     if (
@@ -816,5 +826,73 @@ export class StockPicksService {
     }
 
     return baseResponse;
+  }
+
+  // Summary stats for the dashboard cards in the screenshot
+  async getCustomerSummaryStats(customerId: string) {
+    // Consider only approved picks for performance/returns computation
+    const picks = await this.customerPickRepo.find({
+      where: { customer_id: customerId, status: CustomerPickStatus.APPROVED },
+      relations: ['stock_pick'],
+      order: { approved_at: 'DESC' },
+    });
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const toNum = (v: unknown): number | undefined => {
+      if (v === null || v === undefined) return undefined;
+      const n = typeof v === 'number' ? v : Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    };
+
+    const totalApproved = picks.length;
+    const thisMonthNew = picks.filter(
+      (p) => p.approved_at && p.approved_at >= startOfMonth,
+    ).length;
+
+    // For win rate, count as win if current > selected_price
+    // Only consider picks with both prices present
+    let wins = 0;
+    let considered = 0;
+    let totalCurrent = 0;
+    let totalInvested = 0;
+
+    for (const p of picks) {
+      // Use selected_price snapshot as baseline. If missing (legacy), fall back to target_price.
+      const baseline =
+        toNum((p as any).selected_price) ?? toNum(p.stock_pick?.target_price);
+      const current = toNum(p.stock_pick?.current_price);
+      if (baseline !== undefined && current !== undefined && baseline > 0) {
+        considered += 1;
+        if (current > baseline) wins += 1;
+        totalCurrent += current;
+        totalInvested += baseline;
+      }
+    }
+
+    const winningRatePercent = considered > 0 ? (wins / considered) * 100 : 0;
+    const totalReturn = totalCurrent - totalInvested;
+    const overallReturnPercent =
+      totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
+    const avgReturnPercentPerPick =
+      considered > 0 ? overallReturnPercent / considered : 0;
+
+    return {
+      totals: {
+        total_picks: totalApproved,
+        this_month_new: thisMonthNew,
+        winning_rate_percent: Number(winningRatePercent.toFixed(1)),
+        wins,
+        considered,
+        total_current: Number(totalCurrent.toFixed(2)),
+        total_invested: Number(totalInvested.toFixed(2)),
+        total_return: Number(totalReturn.toFixed(2)),
+        overall_return_percent: Number(overallReturnPercent.toFixed(1)),
+        avg_return_percent_per_pick: Number(
+          (considered > 0 ? overallReturnPercent / considered : 0).toFixed(1),
+        ),
+      },
+    };
   }
 }

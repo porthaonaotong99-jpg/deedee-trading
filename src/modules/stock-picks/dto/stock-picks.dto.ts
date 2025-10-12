@@ -993,3 +993,67 @@ export class CustomerMySelectionItemDto {
   })
   risk_level?: string;
 }
+
+// Dashboard summary for customer's stock picks
+export class CustomerStockPicksSummaryTotalsDto {
+  @ApiProperty({ description: 'Total approved picks' })
+  total_picks: number;
+
+  @ApiProperty({ description: 'New approved picks in the current month' })
+  this_month_new: number;
+
+  @ApiProperty({ description: 'Winning rate percentage (0-100)' })
+  winning_rate_percent: number;
+
+  @ApiProperty({ description: 'Wins considered for win rate' })
+  wins: number;
+
+  @ApiProperty({ description: 'Total considered picks for win rate' })
+  considered: number;
+
+  @ApiProperty({ description: 'Sum of current prices for considered picks' })
+  total_current: number;
+
+  @ApiProperty({ description: 'Sum of target prices for considered picks' })
+  total_invested: number;
+
+  @ApiProperty({ description: 'Total dollar return (current - invested)' })
+  total_return: number;
+
+  @ApiProperty({ description: 'Overall percent return based on totals' })
+  overall_return_percent: number;
+
+  @ApiProperty({ description: 'Average percent return per pick' })
+  avg_return_percent_per_pick: number;
+}
+
+export class CustomerStockPicksSummaryDisplayDto {
+  @ApiProperty({ description: 'Formatted total picks (e.g., 12)' })
+  total_picks: string;
+
+  @ApiProperty({ description: 'Formatted new this month (e.g., +3)' })
+  this_month_new: string;
+
+  @ApiProperty({ description: 'Formatted winning rate (e.g., 75%)' })
+  winning_rate_percent: string;
+
+  @ApiProperty({ description: 'Formatted fraction (e.g., 9 out of 12 picks)' })
+  winning_fraction: string;
+
+  @ApiProperty({ description: 'Formatted total return with currency (e.g., +$2,450)' })
+  total_return: string;
+
+  @ApiProperty({ description: 'Formatted overall percent (e.g., +12.3%)' })
+  overall_return_percent: string;
+
+  @ApiProperty({ description: 'Formatted avg return per pick percent (e.g., +4.2%)' })
+  avg_return_percent_per_pick: string;
+}
+
+export class CustomerStockPicksSummaryDto {
+  @ApiProperty({ description: 'Numeric totals' })
+  totals: CustomerStockPicksSummaryTotalsDto;
+
+  @ApiProperty({ description: 'Display-friendly formatted fields' })
+  display: CustomerStockPicksSummaryDisplayDto;
+}

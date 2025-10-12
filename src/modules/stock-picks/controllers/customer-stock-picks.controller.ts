@@ -285,4 +285,52 @@ export class CustomerStockPicksController {
       message: 'Payment slip submitted successfully',
     });
   }
+
+  @Get('my-stats')
+  @ApiOperation({
+    summary: 'Get my stock picks summary (dashboard cards)',
+    description:
+      'Returns totals and formatted display fields for customer dashboard: total picks, this month new, winning rate, total return, and avg return per pick.',
+  })
+  @ApiResponse({ status: 200, description: 'Summary retrieved successfully' })
+  async getMySummaryStats(@AuthUser() user: JwtPayload) {
+    if (user.type !== 'customer') {
+      throw new ForbiddenException('Only customers can view their stats');
+    }
+
+    const summary = await this.stockPicksService.getCustomerSummaryStats(
+      user.sub,
+    );
+
+    const cur = 'USD'.toUpperCase();
+    const fmtCurrency = (n: number) =>
+      new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: cur,
+        currencyDisplay: 'narrowSymbol',
+        maximumFractionDigits: 0,
+      }).format(n);
+    const fmtPercent = (n: number) => {
+      const sign = n >= 0 ? '+' : '';
+      return `${sign}${n.toFixed(1)}%`;
+    };
+
+    const totals = summary.totals;
+    const display = {
+      total_picks: `${totals.total_picks}`,
+      this_month_new: `+${totals.this_month_new}`,
+      winning_rate_percent: `${totals.winning_rate_percent.toFixed(0)}%`,
+      winning_fraction: `${totals.wins} out of ${totals.considered} picks`,
+      total_return: `${totals.total_return >= 0 ? '+' : ''}${fmtCurrency(Math.abs(totals.total_return))}`,
+      overall_return_percent: `${totals.overall_return_percent >= 0 ? '+' : ''}${totals.overall_return_percent.toFixed(1)}% overall`,
+      avg_return_percent_per_pick: `${fmtPercent(
+        totals.avg_return_percent_per_pick,
+      )} per pick`,
+    };
+
+    return handleSuccessOne({
+      data: { totals, display },
+      message: 'Summary retrieved successfully',
+    });
+  }
 }

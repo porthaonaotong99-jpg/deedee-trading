@@ -69,6 +69,10 @@ export class CustomerStockPick {
   @Column({ type: 'timestamp', nullable: true })
   payment_submitted_at: Date | null;
 
+  // Snapshot of the stock price when the customer selected/submitted this pick
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  selected_price: number | null;
+
   @Column({ type: 'uuid', nullable: true })
   approved_by_admin_id: string | null;
 
