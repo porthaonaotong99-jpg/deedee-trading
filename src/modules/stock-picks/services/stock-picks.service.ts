@@ -196,6 +196,37 @@ export class StockPicksService {
         sector: filterDto.sector,
       });
     }
+    // Created_at date range filter (inclusive)
+    const parseDateParam = (
+      val?: string,
+      endOfDay = false,
+    ): Date | undefined => {
+      if (!val) return undefined;
+      const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(val);
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return undefined;
+      if (isDateOnly) {
+        if (endOfDay) d.setHours(23, 59, 59, 999);
+        else d.setHours(0, 0, 0, 0);
+      }
+      return d;
+    };
+
+    const createdStart = parseDateParam(filterDto.start_date);
+    const createdEnd = parseDateParam(filterDto.end_date, true);
+    if (createdStart && createdEnd && createdStart > createdEnd) {
+      throw new BadRequestException('start_date cannot be after end_date');
+    }
+    if (createdStart) {
+      queryBuilder.andWhere('pick.created_at >= :startDate', {
+        startDate: createdStart,
+      });
+    }
+    if (createdEnd) {
+      queryBuilder.andWhere('pick.created_at <= :endDate', {
+        endDate: createdEnd,
+      });
+    }
     // Percent overlap logic: ranges overlap if minA <= maxB AND maxA >= minB
     if (
       filterDto.min_expected_return_percent !== undefined ||

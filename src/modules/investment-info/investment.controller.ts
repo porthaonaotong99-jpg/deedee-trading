@@ -39,7 +39,7 @@ import {
   handleSuccessOne,
   handleSuccessPaginated,
 } from '../../common/utils/response.util';
-import { InvestmentService } from './updated-investment.service';
+import { InvestmentService } from './investment.service';
 // transaction enums are no longer used here; logic moved to service
 
 @ApiTags('investment-requests')

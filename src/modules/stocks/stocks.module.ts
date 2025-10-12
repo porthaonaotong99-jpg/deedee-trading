@@ -21,6 +21,7 @@ import { StockPricesGateway } from './gateways/stock-prices.gateway';
 import { ExternalPriceFetcherService } from './services/external-price-fetcher.service';
 import { StockMetadataService } from './services/stock-metadata.service';
 import { TechnicalIndicatorsService } from './services/technical-indicators.service';
+import { QuotesService } from './services/quotes.service';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { TechnicalIndicatorsService } from './services/technical-indicators.serv
     StocksService,
     UsersService,
     ExternalPriceFetcherService,
+    QuotesService,
     StockMetadataService,
     TechnicalIndicatorsService,
     // Use forwardRef wrappers only if needed for circular resolution
@@ -57,6 +59,7 @@ import { TechnicalIndicatorsService } from './services/technical-indicators.serv
     StocksService,
     RealTimePriceService,
     ExternalPriceFetcherService,
+    QuotesService,
     StockMetadataService,
   ],
 })

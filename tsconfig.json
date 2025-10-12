@@ -5,7 +5,7 @@
     "resolvePackageJsonExports": true,
     "esModuleInterop": true,
     "isolatedModules": true,
-    "declaration": true,
+    "declaration": false,
     "removeComments": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
@@ -24,5 +24,10 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false
+  },
+  "exclude": ["node_modules", "dist"],
+  "watchOptions": {
+    "excludeDirectories": ["node_modules", "dist"],
+    "synchronousWatchDirectory": false
   }
 }

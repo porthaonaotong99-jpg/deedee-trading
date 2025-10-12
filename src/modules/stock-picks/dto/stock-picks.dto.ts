@@ -534,6 +534,22 @@ export class StockPickFilterDto {
   })
   limit?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Filter by created_at start date (inclusive). Format: YYYY-MM-DD or ISO',
+  })
+  @IsOptional()
+  @IsDateString()
+  start_date?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Filter by created_at end date (inclusive). Format: YYYY-MM-DD or ISO',
+  })
+  @IsOptional()
+  @IsDateString()
+  end_date?: string;
+
   // Additional optional filters used by customer route and (optionally) admin
   @ApiPropertyOptional({
     description: 'Filter by risk level',
@@ -631,6 +647,22 @@ export class CustomerStockPickFilterDto {
     return value as number | undefined;
   })
   limit?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Filter by created_at start date (inclusive). Format: YYYY-MM-DD or ISO',
+  })
+  @IsOptional()
+  @IsDateString()
+  start_date?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Filter by created_at end date (inclusive). Format: YYYY-MM-DD or ISO',
+  })
+  @IsOptional()
+  @IsDateString()
+  end_date?: string;
 
   @ApiPropertyOptional({
     description: 'Filter by risk level',

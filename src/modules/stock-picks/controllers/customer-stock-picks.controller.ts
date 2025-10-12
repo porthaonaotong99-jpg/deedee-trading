@@ -60,6 +60,20 @@ export class CustomerStockPicksController {
     type: Number,
     description: 'Items per page (1-50)',
   })
+  @ApiQuery({
+    name: 'start_date',
+    required: false,
+    type: String,
+    description:
+      'Filter by created_at start date (inclusive). Format: YYYY-MM-DD or ISO',
+  })
+  @ApiQuery({
+    name: 'end_date',
+    required: false,
+    type: String,
+    description:
+      'Filter by created_at end date (inclusive). Format: YYYY-MM-DD or ISO',
+  })
   @ApiResponse({
     status: 200,
     description: 'Available stock picks retrieved successfully',
@@ -86,6 +100,8 @@ export class CustomerStockPicksController {
       max_expected_return_percent: filterDto.max_expected_return_percent,
       min_time_horizon_months: filterDto.min_time_horizon_months,
       max_time_horizon_months: filterDto.max_time_horizon_months,
+      start_date: filterDto.start_date,
+      end_date: filterDto.end_date,
       // No availability filtering - customers see all availability statuses (available, taken, expired)
       // No status filtering - customers see all statuses
     };
