@@ -64,7 +64,7 @@ export class TransferHistoryService {
 
     const qb = this.repo
       .createQueryBuilder('th')
-      .leftJoinAndSelect('th.customer', 'customer')
+      // .leftJoinAndSelect('th.customer', 'customer')
       .where('th.customer_id = :cid', { cid: customerId })
       .orderBy('th.created_at', 'DESC')
       .take(limit)

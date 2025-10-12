@@ -1,27 +1,42 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { InvestmentInfo } from './entities/investment-info.entity';
-import { InvestmentReturns } from './entities/investment-returns.entity';
-import { InvestmentLedger } from './entities/investment-ledger.entity';
+import { ScheduleModule } from '@nestjs/schedule';
+import { InvestmentRequest } from './entities/investment-request.entity';
+import { CustomerInvestmentSummary } from './entities/customer-investment.entity';
+import { InvestmentTransaction } from './entities/investment-transaction.entity';
+import { InterestRateConfiguration } from './entities/interest-rate-configuration.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { TransferHistory } from '../transfer-history/entities/transfer-history.entity';
 import { CustomerService } from '../customers/entities/customer-service.entity';
-import { InvestmentInfoService } from './investment-info.service';
-import { InvestmentInfoController } from './investment-info.controller';
+import { UpdatedInvestmentService } from './updated-investment.service';
+import { InterestTierService } from './interest-tier.service';
+import { DatabaseInterestRateService } from './database-interest-rate.service';
+import { NewInvestmentController } from './new-investment.controller';
+import { InterestRateAdminController } from './interest-rate-admin.controller';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      InvestmentInfo,
-      InvestmentReturns,
-      InvestmentLedger,
+      InvestmentRequest,
+      CustomerInvestmentSummary,
+      InvestmentTransaction,
+      InterestRateConfiguration,
       Wallet,
       TransferHistory,
       CustomerService,
     ]),
+    ScheduleModule.forRoot(),
   ],
-  providers: [InvestmentInfoService],
-  controllers: [InvestmentInfoController],
-  exports: [InvestmentInfoService],
+  providers: [
+    UpdatedInvestmentService,
+    InterestTierService,
+    DatabaseInterestRateService,
+  ],
+  controllers: [NewInvestmentController, InterestRateAdminController],
+  exports: [
+    UpdatedInvestmentService,
+    InterestTierService,
+    DatabaseInterestRateService,
+  ],
 })
 export class InvestmentInfoModule {}

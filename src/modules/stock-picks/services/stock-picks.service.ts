@@ -311,9 +311,9 @@ export class StockPicksService {
 
     if (startDate || endDate) {
       // When filtering by approved_at, only consider approved picks
-      qb.andWhere('cp.status = :approved', {
-        approved: CustomerPickStatus.APPROVED,
-      });
+      // qb.andWhere('cp.status = :approved', {
+      //   approved: CustomerPickStatus.APPROVED,
+      // });
       if (startDate) {
         qb.andWhere('cp.approved_at >= :startDate', { startDate });
       }
