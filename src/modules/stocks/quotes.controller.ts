@@ -7,7 +7,7 @@ import {
 import { RealTimePriceService } from './services/real-time-price.service';
 import {
   handleError,
-  handleSuccessOne,
+  handleSuccessMany,
 } from '../../common/utils/response.util';
 
 @ApiTags('stock-quotes')
@@ -46,7 +46,6 @@ export class StockQuotesController {
     try {
       // Fetch external quote first. We only persist if quote is valid.
       const quote: ExternalQuote | null = await this.fetcher.fetchQuote(sym);
-      console.log({ quote });
       if (!quote) {
         return handleError({
           code: 'NO_QUOTE',
@@ -101,6 +100,7 @@ export class StockQuotesController {
       };
 
       const payload = {
+        id: stockWithCat?.id || null,
         symbol: quote.symbol,
         name: stockWithCat?.company || stockWithCat?.name || sym,
         price: quote.price,
@@ -113,8 +113,8 @@ export class StockQuotesController {
         volume: fmtVolume(quote.volume ?? stockWithCat?.volume ?? null),
       };
 
-      return handleSuccessOne({
-        data: payload,
+      return handleSuccessMany({
+        data: [payload],
         message: 'Normalized quote returned',
       });
     } catch (error) {

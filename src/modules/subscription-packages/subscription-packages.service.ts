@@ -10,12 +10,18 @@ import {
   PaginationUtil,
   PaginatedResult,
 } from '../../common/utils/pagination.util';
+import {
+  CustomerService,
+  CustomerServiceType,
+} from '../customers/entities/customer-service.entity';
 
 @Injectable()
 export class SubscriptionPackagesService {
   constructor(
     @InjectRepository(SubscriptionPackage)
     private readonly repo: Repository<SubscriptionPackage>,
+    @InjectRepository(CustomerService)
+    private readonly customerServiceRepo: Repository<CustomerService>,
   ) {}
 
   async list(
@@ -65,5 +71,58 @@ export class SubscriptionPackagesService {
     qb.andWhere('p.active = true');
     if (serviceType) qb.andWhere('p.service_type = :st', { st: serviceType });
     return qb.getOne();
+  }
+
+  async listWithCustomerContext(
+    filter: SubscriptionPackageFilterDto,
+    customerId?: string,
+  ): Promise<PaginatedResult<SubscriptionPackageResponseDto>> {
+    const base = await this.list(filter);
+
+    if (!customerId) return base;
+
+    const now = new Date();
+    const activeService = await this.customerServiceRepo.findOne({
+      where: {
+        customer_id: customerId,
+        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+        active: true,
+      },
+      select: {
+        id: true,
+        active: true,
+        subscription_expires_at: true,
+        subscription_package_id: true,
+      },
+      order: { applied_at: 'DESC' },
+    });
+
+    let currentPackageId: string | undefined;
+    let expires: Date | null = null;
+
+    if (activeService) {
+      expires = activeService.subscription_expires_at ?? null;
+      currentPackageId = activeService.subscription_package_id ?? undefined;
+    }
+
+    const enriched = base.data.map((pkg) => {
+      const isCurrent = Boolean(
+        currentPackageId && pkg.id === currentPackageId,
+      );
+      const daysLeft = expires
+        ? Math.ceil((expires.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+        : undefined;
+      return {
+        ...pkg,
+        is_current: isCurrent,
+        expiredDate: isCurrent ? expires || undefined : undefined,
+        days_left: daysLeft,
+      } as SubscriptionPackageResponseDto;
+    });
+
+    return {
+      ...base,
+      data: enriched,
+    };
   }
 }

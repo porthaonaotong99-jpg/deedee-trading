@@ -7,12 +7,6 @@ import {
 } from './dto/subscription-packages.dto';
 import { handleSuccessPaginated } from '../../common/utils/response.util';
 import type { JwtPayload } from '../../common/interfaces';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import {
-  CustomerService,
-  CustomerServiceType,
-} from '../customers/entities/customer-service.entity';
 // Payment lookup removed; we now rely solely on CustomerService.subscription_package_id
 import type { Request } from 'express';
 import { JwtService } from '@nestjs/jwt';
@@ -24,8 +18,6 @@ import { getJwtSecrets } from '../../config/jwt.config';
 export class SubscriptionPackagesController {
   constructor(
     private readonly svc: SubscriptionPackagesService,
-    @InjectRepository(CustomerService)
-    private readonly customerServiceRepo: Repository<CustomerService>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -51,8 +43,6 @@ export class SubscriptionPackagesController {
     @Query(ValidationPipe) filter: SubscriptionPackageFilterDto,
     @Req() req: Request,
   ) {
-    const result = await this.svc.list(filter);
-
     // Try to parse Authorization header (optional)
     let user: JwtPayload | undefined;
     const auth = req.headers.authorization;
@@ -70,55 +60,13 @@ export class SubscriptionPackagesController {
         // ignore invalid token and proceed anonymously
       }
     }
-
-    // If authenticated as customer, enrich using current service's subscription_package_id
-    let enriched = result.data;
-    if (user?.type === 'customer') {
-      const now = new Date();
-      // Get the active premium membership service (current subscription)
-      const activeService = await this.customerServiceRepo.findOne({
-        where: {
-          customer_id: user.sub,
-          service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
-          active: true,
-        },
-        select: {
-          id: true,
-          active: true,
-          subscription_expires_at: true,
-          subscription_package_id: true,
-        },
-        order: { applied_at: 'DESC' },
-      });
-
-      let currentPackageId: string | undefined;
-      let expires: Date | null = null;
-
-      if (activeService) {
-        expires = activeService.subscription_expires_at ?? null;
-        currentPackageId = activeService.subscription_package_id ?? undefined;
-      }
-
-      enriched = result.data.map((pkg) => {
-        const isCurrent = Boolean(
-          currentPackageId && pkg.id === currentPackageId,
-        );
-        const daysLeft = expires
-          ? Math.ceil(
-              (expires.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
-            )
-          : undefined;
-        return {
-          ...pkg,
-          is_current: isCurrent,
-          expiredDate: isCurrent ? expires || undefined : undefined,
-          days_left: daysLeft,
-        } as SubscriptionPackageResponseDto;
-      });
-    }
+    const result = await this.svc.listWithCustomerContext(
+      filter,
+      user?.type === 'customer' ? user.sub : undefined,
+    );
 
     return handleSuccessPaginated({
-      data: enriched,
+      data: result.data,
       total: result.total,
       page: result.page,
       limit: result.limit,

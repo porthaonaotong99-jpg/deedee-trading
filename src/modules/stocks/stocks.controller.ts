@@ -44,8 +44,10 @@ import {
 import {
   handleSuccessOne,
   handleSuccessPaginated,
+  handleSuccessMany,
   IOneResponse,
   IPaginatedResponse,
+  IManyResponse,
 } from '../../common/utils/response.util';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -108,7 +110,106 @@ export class StocksController {
     });
   }
 
-  @Get(':id')
+  @Get('good-7')
+  @ApiOperation({ summary: 'Curated 7 large-cap tech stocks' })
+  @ApiResponse({
+    status: 200,
+    description: 'Array of 7 stocks',
+    schema: {
+      example: {
+        is_error: false,
+        code: 'SUCCESS',
+        message: 'Top 7 returned',
+        total: 7,
+        data: [
+          {
+            id: 'uuid-here',
+            symbol: 'AAPL',
+            name: 'Apple Inc.',
+            price: 178.25,
+            change: 2.5,
+            changePercent: 1.42,
+            market: 'NASDAQ',
+            country: 'USA',
+            marketCap: '2.8T',
+            pe: 29.5,
+            volume: '52.3M',
+          },
+        ],
+        status_code: 200,
+      },
+    },
+  })
+  async getGoodSeven(): Promise<IManyResponse<Record<string, unknown>>> {
+    const symbols = ['MSFT', 'AAPL', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA'];
+
+    const fmtShort = (v?: number | null, units?: 'cap' | 'vol') => {
+      if (v === null || v === undefined) return null;
+      const abs = Math.abs(v);
+      if (units === 'cap') {
+        if (abs >= 1_000_000_000_000)
+          return `${(v / 1_000_000_000_000).toFixed(1)}T`;
+        if (abs >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)}B`;
+        if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+        if (abs >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+        return String(v);
+      }
+      // volume units
+      if (abs >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(1)}B`;
+      if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+      if (abs >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+      return String(v);
+    };
+
+    // Ensure symbols exist and try to refresh quotes quickly (fire & forget)
+    await Promise.all(
+      symbols.map(async (s) => {
+        await this.realTimePriceService.ensureSymbol(s);
+        // non-blocking fetch, errors ignored here
+        void this.realTimePriceService
+          .fetchAndUpdate(s, false)
+          .catch(() => undefined);
+      }),
+    );
+
+    // Fetch stocks and current quotes
+    const results = await Promise.all(
+      symbols.map(async (s) => {
+        const stock = await this.stocksService['stockRepository'].findOne({
+          where: { symbol: s },
+        });
+        const quote = this.realTimePriceService.getCurrentPrice(s);
+        return { stock, quote };
+      }),
+    );
+
+    const data = results
+      .map(({ stock, quote }) => {
+        if (!stock) return null; // skip if missing
+        const price = quote?.price ?? Number(stock.last_price ?? 0);
+        const change = quote?.change ?? Number(stock.change ?? 0);
+        const changePercent =
+          quote?.changePercent ?? Number(stock.change_percent ?? 0);
+        return {
+          id: stock.id,
+          symbol: stock.symbol,
+          name: stock.company || stock.name,
+          price,
+          change,
+          changePercent,
+          market: stock.exchange || 'SMART',
+          country: stock.country || null,
+          marketCap: fmtShort(stock.market_cap ?? null, 'cap'),
+          pe: stock.pe_ratio ?? null,
+          volume: fmtShort(quote?.volume ?? stock.volume ?? null, 'vol'),
+        };
+      })
+      .filter((v): v is NonNullable<typeof v> => v !== null);
+
+    return handleSuccessMany({ data, message: 'Top 7 returned' });
+  }
+
+  @Get('id/:id')
   @ApiOperation({ summary: 'Get a stock by id' })
   @ApiResponse({
     status: 200,

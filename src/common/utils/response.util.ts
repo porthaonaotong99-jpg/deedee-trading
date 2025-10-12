@@ -88,6 +88,32 @@ export function handleSuccessPaginated<T>(params: {
   };
 }
 
+// Success (many resources, non-paginated)
+export function handleSuccessMany<T>(params: {
+  code?: string;
+  message?: string;
+  data?: T[] | null;
+  total?: number;
+  statusCode?: number;
+}): IManyResponse<T> {
+  const {
+    code = 'SUCCESS',
+    message = 'Success',
+    data = null,
+    total = Array.isArray(data) ? data.length : 0,
+    statusCode = 200,
+  } = params;
+  return {
+    is_error: false,
+    code,
+    message,
+    total,
+    data,
+    error: null,
+    status_code: statusCode,
+  };
+}
+
 // Error handler
 export function handleError(params: {
   code?: string;
