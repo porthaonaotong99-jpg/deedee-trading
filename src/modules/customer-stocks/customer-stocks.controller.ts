@@ -15,9 +15,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { CustomerStocksService } from './customer-stocks.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { JwtCustomerAuthGuard } from '../auth/guards/jwt-customer.guard';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { AuthUser } from '../../common/decorators/auth-user.decorator';

@@ -1040,13 +1040,17 @@ export class CustomerStockPicksSummaryDisplayDto {
   @ApiProperty({ description: 'Formatted fraction (e.g., 9 out of 12 picks)' })
   winning_fraction: string;
 
-  @ApiProperty({ description: 'Formatted total return with currency (e.g., +$2,450)' })
+  @ApiProperty({
+    description: 'Formatted total return with currency (e.g., +$2,450)',
+  })
   total_return: string;
 
   @ApiProperty({ description: 'Formatted overall percent (e.g., +12.3%)' })
   overall_return_percent: string;
 
-  @ApiProperty({ description: 'Formatted avg return per pick percent (e.g., +4.2%)' })
+  @ApiProperty({
+    description: 'Formatted avg return per pick percent (e.g., +4.2%)',
+  })
   avg_return_percent_per_pick: string;
 }
 

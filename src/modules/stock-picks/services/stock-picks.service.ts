@@ -701,7 +701,7 @@ export class StockPicksService {
     };
     // Use snapshot selected_price if available, else fall back to target_price
     const targetPrice =
-      toNum((customerPick as any).selected_price) ??
+      toNum(customerPick.selected_price) ??
       toNum(customerPick.stock_pick?.target_price);
     const currentPrice = toNum(customerPick.stock_pick?.current_price);
     let changePercent: number | undefined = undefined;
@@ -861,7 +861,7 @@ export class StockPicksService {
     for (const p of picks) {
       // Use selected_price snapshot as baseline. If missing (legacy), fall back to target_price.
       const baseline =
-        toNum((p as any).selected_price) ?? toNum(p.stock_pick?.target_price);
+        toNum(p.selected_price) ?? toNum(p.stock_pick?.target_price);
       const current = toNum(p.stock_pick?.current_price);
       if (baseline !== undefined && current !== undefined && baseline > 0) {
         considered += 1;
@@ -875,8 +875,6 @@ export class StockPicksService {
     const totalReturn = totalCurrent - totalInvested;
     const overallReturnPercent =
       totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
-    const avgReturnPercentPerPick =
-      considered > 0 ? overallReturnPercent / considered : 0;
 
     return {
       totals: {

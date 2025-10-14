@@ -26,6 +26,7 @@ import { CountryModule } from './modules/country/country.module';
 import { ProvinceModule } from './modules/province/province.module';
 import { DistrictModule } from './modules/district/district.module';
 import { InvestmentInfoModule } from './modules/investment-info/investment-info.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { InvestmentInfoModule } from './modules/investment-info/investment-info.
     ProvinceModule,
     DistrictModule,
     InvestmentInfoModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],
