@@ -67,7 +67,7 @@ export class CustomerStocksService {
       };
 
       return {
-        id: stock?.symbol || 'N/A',
+        id: stock?.id || 'N/A',
         name: stock?.name || 'Unknown Stock',
         market: stock?.country || stock?.exchange || 'Unknown',
         shares: shares,
