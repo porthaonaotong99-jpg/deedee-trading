@@ -1102,13 +1102,14 @@ export class CustomersService {
 
     // Always return success to prevent email enumeration attacks
     if (!customer) {
-      return {
-        status: 'success',
-        message:
-          'If the email exists, password reset instructions have been sent.',
-        expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-        method: dto.method || PasswordResetMethod.EMAIL_OTP,
-      };
+      throw new BadRequestException('Email not existing in system.');
+      // return {
+      //   status: 'success',
+      //   message:
+      //     'If the email exists, password reset instructions have been sent.',
+      //   expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      //   method: dto.method || PasswordResetMethod.EMAIL_OTP,
+      // };
     }
 
     // Invalidate existing active tokens for this email
