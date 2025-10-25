@@ -192,8 +192,9 @@ export class StockPicksService {
       });
     }
     if (filterDto.sector) {
-      queryBuilder.andWhere('LOWER(pick.sector) = LOWER(:sector)', {
-        sector: filterDto.sector,
+      // Case-insensitive partial match using ILIKE (PostgreSQL)
+      queryBuilder.andWhere('pick.sector ILIKE :sector', {
+        sector: `%${filterDto.sector}%`,
       });
     }
     // Created_at date range filter (inclusive)
