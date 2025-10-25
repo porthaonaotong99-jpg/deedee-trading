@@ -154,7 +154,7 @@ export class StockPicksService {
 
   // Customer methods
   async getAvailablePicksForCustomer(
-    customerId: string,
+    customerId: string | null,
     filterDto: StockPickFilterDto,
   ): Promise<PaginatedResult<CustomerViewStockPickDto>> {
     const { page, limit, skip } = PaginationUtil.calculatePagination({
@@ -261,16 +261,19 @@ export class StockPicksService {
 
     const [data, total] = await queryBuilder.getManyAndCount();
 
-    // Fetch customer's non-rejected selections for quick lookup
-    const customerSelections = await this.customerPickRepo.find({
-      where: { customer_id: customerId },
-      select: ['stock_pick_id', 'status'],
-    });
-    const selectedSet = new Set(
-      customerSelections
-        .filter((s) => s.status !== CustomerPickStatus.REJECTED)
-        .map((s) => s.stock_pick_id),
-    );
+    // Fetch customer's non-rejected selections for quick lookup (only if authenticated)
+    let selectedSet = new Set<string>();
+    if (customerId) {
+      const customerSelections = await this.customerPickRepo.find({
+        where: { customer_id: customerId },
+        select: ['stock_pick_id', 'status'],
+      });
+      selectedSet = new Set(
+        customerSelections
+          .filter((s) => s.status !== CustomerPickStatus.REJECTED)
+          .map((s) => s.stock_pick_id),
+      );
+    }
 
     const mappedData = data.map((pick) =>
       this.mapToCustomerViewDto(pick, selectedSet.has(pick.id)),

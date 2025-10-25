@@ -19,6 +19,7 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { JwtCustomerAuthGuard } from '../../../modules/auth/guards/jwt-customer.guard';
+import { JwtCustomerOptionalGuard } from '../../../modules/auth/guards/jwt-customer-optional.guard';
 import { StockPicksService } from '../services/stock-picks.service';
 import {
   StockPickFilterDto,
@@ -37,16 +38,15 @@ import {
 
 @ApiTags('Customer Stock Picks')
 @Controller('stock-picks')
-@UseGuards(JwtCustomerAuthGuard)
-@ApiBearerAuth()
 export class CustomerStockPicksController {
   constructor(private readonly stockPicksService: StockPicksService) {}
 
   @Get()
+  @UseGuards(JwtCustomerOptionalGuard)
   @ApiOperation({
-    summary: 'Get available stock picks for customer',
+    summary: 'Get available stock picks (public or authenticated)',
     description:
-      'Get all stock picks available to customers. Shows ALL stock picks regardless of service type or status. Only shows active and available picks. Stock symbols are hidden for security.',
+      'Get all stock picks available to customers. Works with or without authentication. When authenticated, shows personalized data. When unauthenticated, shows public stock picks. Shows ALL stock picks regardless of service type or status. Only shows active and available picks. Stock symbols are hidden for security.',
   })
   @ApiQuery({
     name: 'page',
@@ -81,9 +81,10 @@ export class CustomerStockPicksController {
   })
   async getAvailableStockPicks(
     @Query(ValidationPipe) filterDto: CustomerStockPickFilterDto,
-    @AuthUser() user: JwtPayload,
+    @AuthUser() user?: JwtPayload,
   ) {
-    if (user.type !== 'customer') {
+    // If user is authenticated, verify they are a customer
+    if (user && user.type !== 'customer') {
       throw new ForbiddenException('Only customers can view stock picks');
     }
 
@@ -106,8 +107,11 @@ export class CustomerStockPicksController {
       // No status filtering - customers see all statuses
     };
 
+    // Use customerId if authenticated, otherwise pass null for public access
+    const customerId = user?.sub || null;
+
     const result = await this.stockPicksService.getAvailablePicksForCustomer(
-      user.sub,
+      customerId,
       internalFilter,
     );
 
@@ -122,6 +126,8 @@ export class CustomerStockPicksController {
   }
 
   @Get('my-selections')
+  @UseGuards(JwtCustomerAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get customer stock pick selections',
     description:
@@ -192,6 +198,8 @@ export class CustomerStockPicksController {
   }
 
   @Get('my-selections/:id')
+  @UseGuards(JwtCustomerAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get specific customer stock pick selection',
     description: 'Get detailed information about a specific selection',
@@ -239,6 +247,8 @@ export class CustomerStockPicksController {
   }
 
   @Post('selections/:id/payment-slip')
+  @UseGuards(JwtCustomerAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Submit payment slip for stock pick',
     description:
@@ -287,6 +297,8 @@ export class CustomerStockPicksController {
   }
 
   @Get('my-stats')
+  @UseGuards(JwtCustomerAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({
     summary: 'Get my stock picks summary (dashboard cards)',
     description:
