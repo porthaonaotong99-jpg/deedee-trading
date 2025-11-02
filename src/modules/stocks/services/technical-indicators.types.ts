@@ -3,35 +3,7 @@ export interface RSISignal {
   rsi: number;
   status: 'oversold' | 'neutral' | 'overbought';
   timestamp: Date;
-}
-
-export interface TechnicalIndicatorComponent {
-  name: string;
-  value: number;
-  signal: 'buy' | 'sell' | 'neutral';
-}
-
-export interface TechnicalSummary {
-  symbol: string;
-  overallRecommendation: 'buy' | 'sell' | 'neutral';
-  indicators: TechnicalIndicatorComponent[];
-  timestamp: Date;
-}
-
-export interface SupportResistanceLevel {
-  level: number;
-  type: 'support' | 'resistance';
-}
-
-export interface SupportResistanceAnalysis {
-  symbol: string;
-  currentPrice: number;
-  nearestSupport: number | null;
-  nearestResistance: number | null;
-  supportDistance: number | null; // percentage
-  resistanceDistance: number | null; // percentage
-  levels: SupportResistanceLevel[];
-  timestamp: Date;
+  provider: 'alphaVantage' | 'polygon';
 }
 
 export interface MarketMoverStock {
@@ -39,9 +11,9 @@ export interface MarketMoverStock {
   lastPrice: number;
   changePercent: number;
   change: number;
-  high: number;
-  low: number;
-  volume: number;
+  high?: number | null;
+  low?: number | null;
+  volume?: number | null;
 }
 
 export interface MarketMoversResponse {
@@ -50,49 +22,52 @@ export interface MarketMoversResponse {
   timestamp: Date;
 }
 
-export interface TechnicalAnalysisSummary {
-  symbol: string;
-  rsi: string; // "75.2 (overbought)"
-  summarySignal: 'buy' | 'sell' | 'neutral';
-  nearestSupport: string; // "245.50 (-3.8%)"
-  nearestResistance: string; // "265.80 (+4.1%)"
+// Alpha Vantage Market Movers Types
+export interface AlphaVantageStock {
+  ticker: string;
+  price: string;
+  change_amount: string;
+  change_percentage: string;
+  volume: string;
 }
 
-// Finnhub API Response Types
-export interface FinnhubRsiResponse {
-  s: 'ok' | 'no_data';
-  rsi?: number[];
-  t?: number[]; // timestamps
+export interface AlphaVantageMarketMoversResponse {
+  metadata: string;
+  last_updated: string;
+  top_gainers: AlphaVantageStock[];
+  top_losers: AlphaVantageStock[];
+  most_actively_traded: AlphaVantageStock[];
 }
 
-export interface FinnhubTechnicalAnalysisResponse {
-  technicalAnalysis?: {
-    adx?: { adx: number; signal: 'buy' | 'sell' | 'neutral' };
-    rsi?: { rsi: number; signal: 'buy' | 'sell' | 'neutral' };
-    macd?: { macd: number; signal: 'buy' | 'sell' | 'neutral' };
-    sma?: { sma: number; signal: 'buy' | 'sell' | 'neutral' };
-    ema?: { ema: number; signal: 'buy' | 'sell' | 'neutral' };
-    signal?: 'buy' | 'sell' | 'neutral';
-    count?: {
-      buy: number;
-      neutral: number;
-      sell: number;
-    };
+export interface PolygonRsiValue {
+  timestamp: number;
+  value: number;
+}
+
+export interface PolygonRsiResponse {
+  status: 'OK' | 'ERROR';
+  request_id: string;
+  results?: {
+    values?: PolygonRsiValue[];
   };
+  error?: string;
 }
 
-export interface FinnhubSupportResistanceResponse {
-  levels?: number[];
+export type AlphaVantageMoverCategory =
+  | 'top_gainers'
+  | 'top_losers'
+  | 'most_actively_traded';
+
+export interface USMarketRsiMetadata {
+  limitPerCategory: number;
+  totalRequested: number;
+  providerPreference: 'polygon' | 'alphaVantage' | 'auto';
+  categories: Record<AlphaVantageMoverCategory, string[]>;
 }
 
-export interface FinnhubQuoteResponse {
-  c: number; // current price
-  d: number; // change
-  dp: number; // percent change
-  h: number; // high price of the day
-  l: number; // low price of the day
-  o: number; // open price of the day
-  pc: number; // previous close price
-  t: number; // timestamp
-  v?: number; // volume
+export interface USMarketRsiResponse {
+  timestamp: Date;
+  symbols: RSISignal[];
+  failedSymbols: string[];
+  metadata: USMarketRsiMetadata;
 }

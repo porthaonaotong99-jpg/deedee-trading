@@ -1,544 +1,400 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
-  RSISignal,
-  TechnicalSummary,
-  SupportResistanceAnalysis,
-  SupportResistanceLevel,
-  MarketMoversResponse,
+  AlphaVantageMarketMoversResponse,
+  AlphaVantageStock,
+  AlphaVantageMoverCategory,
   MarketMoverStock,
-  TechnicalAnalysisSummary,
-  TechnicalIndicatorComponent,
-  FinnhubRsiResponse,
-  FinnhubTechnicalAnalysisResponse,
-  FinnhubSupportResistanceResponse,
-  FinnhubQuoteResponse,
+  MarketMoversResponse,
+  PolygonRsiResponse,
+  RSISignal,
+  USMarketRsiResponse,
 } from './technical-indicators.types';
+
+type AlphaInterval =
+  | '1min'
+  | '5min'
+  | '15min'
+  | '30min'
+  | '60min'
+  | 'daily'
+  | 'weekly'
+  | 'monthly';
+
+type PolygonTimespan = 'minute' | 'hour' | 'day' | 'week' | 'month';
 
 @Injectable()
 export class TechnicalIndicatorsService {
   private readonly logger = new Logger(TechnicalIndicatorsService.name);
-  private readonly finnhubApiKey = process.env.FINNHUB_KEY;
-  private readonly baseUrl = 'https://finnhub.io/api/v1';
-
-  // Common universe of stocks for market movers analysis
-  private readonly STOCK_UNIVERSE = [
-    'AAPL',
-    'MSFT',
-    'GOOGL',
-    'AMZN',
-    'TSLA',
-    'META',
-    'NVDA',
-    'NFLX',
-    'CRM',
-    'ADBE',
-    'INTC',
-    'AMD',
-    'ORCL',
-    'IBM',
-    'UBER',
-    'SPOT',
-    'PYPL',
-    'SQ',
-    'SHOP',
-    'ZM',
-    'TWTR',
-    'SNAP',
-    'PINS',
-    'ROKU',
-    'PLTR',
-    'SNOW',
-    'DDOG',
-    'MDB',
-    'CRWD',
-    'ZS',
-  ];
+  private readonly alphaVantageApiKey = process.env.ALPHA_VANTAGE_KEY;
+  private readonly polygonApiKey = process.env.POLYGON_API_KEY;
 
   constructor() {
-    if (!this.finnhubApiKey) {
-      this.logger.error('FINNHUB_KEY is required for technical indicators');
-    } else {
-      this.logger.log(
-        'Technical Indicators Service initialized with Finnhub API',
+    if (!this.alphaVantageApiKey && !this.polygonApiKey) {
+      this.logger.warn(
+        'No market data provider configured. Please set ALPHA_VANTAGE_KEY and/or POLYGON_API_KEY.',
       );
     }
   }
 
-  /**
-   * Type-safe JSON parsing utility
-   */
-  private async parseApiResponse<T>(response: Response): Promise<T | null> {
-    try {
-      const json: unknown = await response.json();
-      return json as T;
-    } catch {
-      return null;
+  private classifyRsi(value: number): RSISignal['status'] {
+    if (value <= 30) {
+      return 'oversold';
     }
+    if (value >= 70) {
+      return 'overbought';
+    }
+    return 'neutral';
   }
 
-  /**
-   * 1. Get RSI for a symbol and classify the signal
-   */
-  async getRSI(
+  private parseNumericString(value: string): number | null {
+    const cleaned = value.replace(/[%,$]/g, '').replace(/,/g, '');
+    const parsed = Number.parseFloat(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  async getAlphaVantageRSI(
     symbol: string,
-    resolution = 'D',
+    interval: AlphaInterval = 'daily',
     timeperiod = 14,
   ): Promise<RSISignal | null> {
-    if (!this.finnhubApiKey) {
-      this.logger.error('Finnhub API key not available');
+    if (!this.alphaVantageApiKey) {
+      this.logger.error('Alpha Vantage API key not available');
       return null;
     }
 
     try {
-      const to = Math.floor(Date.now() / 1000);
-      const from = to - 365 * 24 * 60 * 60; // 1 year ago
-
-      const url = `${this.baseUrl}/indicator?symbol=${symbol}&resolution=${resolution}&from=${from}&to=${to}&indicator=rsi&timeperiod=${timeperiod}&token=${this.finnhubApiKey}`;
-
+      const upperSymbol = symbol.toUpperCase();
+      const url = `https://www.alphavantage.co/query?function=RSI&symbol=${upperSymbol}&interval=${interval}&time_period=${timeperiod}&series_type=close&apikey=${this.alphaVantageApiKey}`;
       this.logger.debug(
-        `Fetching RSI for ${symbol}: ${url.replace(/token=[^&]+/, 'token=***')}`,
+        `Fetching Alpha Vantage RSI for ${upperSymbol}: ${url.replace(/apikey=[^&]+/, 'apikey=***')}`,
       );
 
       const response = await fetch(url);
       if (!response.ok) {
         this.logger.error(
-          `RSI API failed for ${symbol}: ${response.status} ${response.statusText}`,
+          `Alpha Vantage RSI API failed for ${upperSymbol}: ${response.status} ${response.statusText}`,
         );
         return null;
       }
 
-      const data = await this.parseApiResponse<FinnhubRsiResponse>(response);
-      if (!data) {
-        this.logger.error(`Failed to parse RSI response for ${symbol}`);
+      const payload = (await response.json()) as Record<string, unknown>;
+      const rsiSection = payload['Technical Analysis: RSI'];
+      if (!rsiSection || typeof rsiSection !== 'object') {
+        this.logger.warn(`No Alpha Vantage RSI data for ${upperSymbol}`);
         return null;
       }
 
-      if (data.s !== 'ok' || !data.rsi || data.rsi.length === 0) {
-        this.logger.warn(`No RSI data available for ${symbol}`);
+      const entries = Object.keys(rsiSection as Record<string, unknown>);
+      if (!entries.length) {
+        this.logger.warn(`No Alpha Vantage RSI entries for ${upperSymbol}`);
         return null;
       }
 
-      // Get the latest RSI value
-      const latestRSI = data.rsi[data.rsi.length - 1];
-
-      let status: 'oversold' | 'neutral' | 'overbought';
-      if (latestRSI <= 30) {
-        status = 'oversold';
-      } else if (latestRSI >= 70) {
-        status = 'overbought';
-      } else {
-        status = 'neutral';
-      }
-
-      this.logger.debug(
-        `RSI for ${symbol}: ${latestRSI.toFixed(2)} (${status})`,
-      );
-
-      return {
-        symbol,
-        rsi: Math.round(latestRSI * 100) / 100,
-        status,
-        timestamp: new Date(),
-      };
-    } catch (error) {
-      this.logger.error(`Error fetching RSI for ${symbol}:`, error);
-      return null;
-    }
-  }
-
-  /**
-   * 2. Get technical summary/aggregate signal for a symbol
-   */
-  async getTechnicalSummary(
-    symbol: string,
-    resolution = 'D',
-  ): Promise<TechnicalSummary | null> {
-    if (!this.finnhubApiKey) {
-      this.logger.error('Finnhub API key not available');
-      return null;
-    }
-
-    try {
-      const url = `${this.baseUrl}/scan/technical-indicator?symbol=${symbol}&resolution=${resolution}&token=${this.finnhubApiKey}`;
-
-      this.logger.debug(
-        `Fetching technical summary for ${symbol}: ${url.replace(/token=[^&]+/, 'token=***')}`,
-      );
-
-      const response = await fetch(url);
-      if (!response.ok) {
-        this.logger.error(
-          `Technical summary API failed for ${symbol}: ${response.status} ${response.statusText}`,
-        );
-        return null;
-      }
-
-      const data =
-        await this.parseApiResponse<FinnhubTechnicalAnalysisResponse>(response);
-      if (!data) {
-        this.logger.error(
-          `Failed to parse technical analysis response for ${symbol}`,
-        );
-        return null;
-      }
-
-      if (!data.technicalAnalysis) {
-        this.logger.warn(`No technical analysis data available for ${symbol}`);
-        return null;
-      }
-
-      const ta = data.technicalAnalysis;
-      const indicators: TechnicalIndicatorComponent[] = [];
-
-      // Extract key indicators
-      if (ta.rsi) {
-        indicators.push({
-          name: 'RSI',
-          value: Math.round(ta.rsi.rsi * 100) / 100,
-          signal: ta.rsi.signal,
-        });
-      }
-
-      if (ta.macd) {
-        indicators.push({
-          name: 'MACD',
-          value: Math.round(ta.macd.macd * 10000) / 10000,
-          signal: ta.macd.signal,
-        });
-      }
-
-      if (ta.sma) {
-        indicators.push({
-          name: 'SMA',
-          value: Math.round(ta.sma.sma * 100) / 100,
-          signal: ta.sma.signal,
-        });
-      }
-
-      if (ta.ema) {
-        indicators.push({
-          name: 'EMA',
-          value: Math.round(ta.ema.ema * 100) / 100,
-          signal: ta.ema.signal,
-        });
-      }
-
-      if (ta.adx) {
-        indicators.push({
-          name: 'ADX',
-          value: Math.round(ta.adx.adx * 100) / 100,
-          signal: ta.adx.signal,
-        });
-      }
-
-      // Determine overall recommendation based on signal counts
-      let overallRecommendation: 'buy' | 'sell' | 'neutral' = 'neutral';
-      if (ta.signal) {
-        overallRecommendation = ta.signal;
-      } else if (ta.count) {
-        if (ta.count.buy > ta.count.sell) {
-          overallRecommendation = 'buy';
-        } else if (ta.count.sell > ta.count.buy) {
-          overallRecommendation = 'sell';
-        }
-      }
-
-      this.logger.debug(
-        `Technical summary for ${symbol}: ${overallRecommendation} (${indicators.length} indicators)`,
-      );
-
-      return {
-        symbol,
-        overallRecommendation,
-        indicators: indicators.slice(0, 5), // Limit to 5 key indicators
-        timestamp: new Date(),
-      };
-    } catch (error) {
-      this.logger.error(
-        `Error fetching technical summary for ${symbol}:`,
-        error,
-      );
-      return null;
-    }
-  }
-
-  /**
-   * 3. Get support/resistance levels and compute nearest levels
-   */
-  async getSupportResistance(
-    symbol: string,
-  ): Promise<SupportResistanceAnalysis | null> {
-    if (!this.finnhubApiKey) {
-      this.logger.error('Finnhub API key not available');
-      return null;
-    }
-
-    try {
-      // Get current price first
-      const currentPrice = await this.getCurrentPrice(symbol);
-      if (!currentPrice) {
-        this.logger.error(`Could not get current price for ${symbol}`);
-        return null;
-      }
-
-      // Get support/resistance levels
-      const srUrl = `${this.baseUrl}/scan/support-resistance?symbol=${symbol}&resolution=D&token=${this.finnhubApiKey}`;
-
-      this.logger.debug(
-        `Fetching support/resistance for ${symbol}: ${srUrl.replace(/token=[^&]+/, 'token=***')}`,
-      );
-
-      const response = await fetch(srUrl);
-      if (!response.ok) {
-        this.logger.error(
-          `Support/Resistance API failed for ${symbol}: ${response.status} ${response.statusText}`,
-        );
-        return null;
-      }
-
-      const data =
-        await this.parseApiResponse<FinnhubSupportResistanceResponse>(response);
-      if (!data) {
-        this.logger.error(
-          `Failed to parse support/resistance response for ${symbol}`,
-        );
-        return null;
-      }
-
-      if (!data.levels || data.levels.length === 0) {
+      const latestDate = entries.sort().pop();
+      if (!latestDate) {
         this.logger.warn(
-          `No support/resistance levels available for ${symbol}`,
+          `Unable to determine latest RSI date for ${upperSymbol}`,
         );
-        return {
-          symbol,
-          currentPrice,
-          nearestSupport: null,
-          nearestResistance: null,
-          supportDistance: null,
-          resistanceDistance: null,
-          levels: [],
-          timestamp: new Date(),
-        };
+        return null;
       }
 
-      // Classify levels as support or resistance based on current price
-      const levels: SupportResistanceLevel[] = data.levels.map((level) => ({
-        level,
-        type: level < currentPrice ? 'support' : 'resistance',
-      }));
+      const latestRecord = (
+        rsiSection as Record<string, Record<string, string>>
+      )[latestDate];
+      const latestValue = this.parseNumericString(latestRecord?.RSI ?? '');
+      if (latestValue === null) {
+        this.logger.warn(`Invalid Alpha Vantage RSI value for ${upperSymbol}`);
+        return null;
+      }
 
-      // Find nearest support (highest level below current price)
-      const supportLevels = levels
-        .filter((l) => l.type === 'support')
-        .map((l) => l.level)
-        .sort((a, b) => b - a);
-
-      const nearestSupport = supportLevels.length > 0 ? supportLevels[0] : null;
-
-      // Find nearest resistance (lowest level above current price)
-      const resistanceLevels = levels
-        .filter((l) => l.type === 'resistance')
-        .map((l) => l.level)
-        .sort((a, b) => a - b);
-
-      const nearestResistance =
-        resistanceLevels.length > 0 ? resistanceLevels[0] : null;
-
-      // Calculate distances as percentages
-      const supportDistance = nearestSupport
-        ? Math.round(((currentPrice - nearestSupport) / currentPrice) * 10000) /
-          100
-        : null;
-
-      const resistanceDistance = nearestResistance
-        ? Math.round(
-            ((nearestResistance - currentPrice) / currentPrice) * 10000,
-          ) / 100
-        : null;
+      const rounded = Math.round(latestValue * 100) / 100;
+      const status = this.classifyRsi(rounded);
 
       this.logger.debug(
-        `Support/Resistance for ${symbol}: Support=${nearestSupport} (${supportDistance}%), Resistance=${nearestResistance} (${resistanceDistance}%)`,
+        `Alpha Vantage RSI for ${upperSymbol}: ${rounded.toFixed(2)} (${status})`,
       );
 
       return {
-        symbol,
-        currentPrice,
-        nearestSupport,
-        nearestResistance,
-        supportDistance,
-        resistanceDistance,
-        levels,
-        timestamp: new Date(),
+        symbol: upperSymbol,
+        rsi: rounded,
+        status,
+        timestamp: new Date(latestDate),
+        provider: 'alphaVantage',
       };
     } catch (error) {
-      this.logger.error(
-        `Error fetching support/resistance for ${symbol}:`,
-        error,
-      );
+      this.logger.error('Error fetching Alpha Vantage RSI:', error);
       return null;
     }
   }
 
-  /**
-   * 4. Get top gainers and losers from the stock universe
-   */
-  async getMarketMovers(): Promise<MarketMoversResponse | null> {
-    if (!this.finnhubApiKey) {
-      this.logger.error('Finnhub API key not available');
+  async getPolygonRSI(
+    symbol: string,
+    timespan: PolygonTimespan = 'day',
+    window = 14,
+  ): Promise<RSISignal | null> {
+    if (!this.polygonApiKey) {
+      this.logger.error('Polygon API key not available');
       return null;
     }
 
     try {
+      const upperSymbol = symbol.toUpperCase();
+      const windowSize = window ?? 14;
+      const url = `https://api.polygon.io/v1/indicators/rsi/${upperSymbol}?timespan=${timespan}&adjusted=true&window=${windowSize}&series_type=close&order=desc&limit=1&apiKey=${this.polygonApiKey}`;
       this.logger.debug(
-        `Fetching market data for ${this.STOCK_UNIVERSE.length} stocks`,
+        `Fetching Polygon RSI for ${upperSymbol}: ${url.replace(/apiKey=[^&]+/, 'apiKey=***')}`,
       );
 
-      // Fetch quotes for all symbols in parallel
-      const promises = this.STOCK_UNIVERSE.map(async (symbol) => {
-        try {
-          const quote = await this.getQuote(symbol);
-          if (!quote) return null;
+      const response = await fetch(url);
+      if (!response.ok) {
+        this.logger.error(
+          `Polygon RSI API failed for ${upperSymbol}: ${response.status} ${response.statusText}`,
+        );
+        return null;
+      }
 
-          const changePercent = ((quote.c - quote.pc) / quote.pc) * 100;
+      const payload = (await response.json()) as PolygonRsiResponse;
+      const latest = payload.results?.values?.[0];
+      if (
+        payload.status !== 'OK' ||
+        !latest ||
+        typeof latest.value !== 'number'
+      ) {
+        this.logger.warn(`No Polygon RSI data available for ${upperSymbol}`);
+        return null;
+      }
 
-          return {
-            symbol,
-            lastPrice: quote.c,
-            changePercent: Math.round(changePercent * 100) / 100,
-            change: Math.round((quote.c - quote.pc) * 100) / 100,
-            high: quote.h,
-            low: quote.l,
-            volume: quote.v || 0,
-          } as MarketMoverStock;
-        } catch (error) {
-          this.logger.warn(`Failed to fetch quote for ${symbol}:`, error);
-          return null;
-        }
+      const rounded = Math.round(latest.value * 100) / 100;
+      const status = this.classifyRsi(rounded);
+
+      this.logger.debug(
+        `Polygon RSI for ${upperSymbol}: ${rounded.toFixed(2)} (${status})`,
+      );
+
+      return {
+        symbol: upperSymbol,
+        rsi: rounded,
+        status,
+        timestamp: new Date(latest.timestamp),
+        provider: 'polygon',
+      };
+    } catch (error) {
+      this.logger.error('Error fetching Polygon RSI:', error);
+      return null;
+    }
+  }
+
+  async getRSI(
+    symbol: string,
+    {
+      provider,
+      interval = 'daily',
+      timeperiod = 14,
+      timespan = 'day',
+      window,
+      fallback = true,
+    }: {
+      provider?: 'polygon' | 'alphaVantage';
+      interval?: AlphaInterval;
+      timeperiod?: number;
+      timespan?: PolygonTimespan;
+      window?: number;
+      fallback?: boolean;
+    } = {},
+  ): Promise<RSISignal | null> {
+    const preferredProvider =
+      provider ?? (this.polygonApiKey ? 'polygon' : 'alphaVantage');
+
+    if (preferredProvider === 'polygon') {
+      const polygonResult = await this.getPolygonRSI(
+        symbol,
+        timespan,
+        window ?? timeperiod,
+      );
+
+      if (polygonResult || provider === 'polygon' || !fallback) {
+        return polygonResult;
+      }
+    }
+
+    return this.getAlphaVantageRSI(symbol, interval, timeperiod);
+  }
+
+  private async fetchAlphaVantageMarketMovers(): Promise<AlphaVantageMarketMoversResponse | null> {
+    if (!this.alphaVantageApiKey) {
+      this.logger.error('Alpha Vantage API key not available');
+      return null;
+    }
+
+    try {
+      const url = `https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey=${this.alphaVantageApiKey}`;
+      this.logger.debug('Fetching Alpha Vantage top gainers/losers universe');
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        this.logger.error(
+          `Alpha Vantage market movers request failed: ${response.status} ${response.statusText}`,
+        );
+        return null;
+      }
+
+      const payload =
+        (await response.json()) as Partial<AlphaVantageMarketMoversResponse>;
+
+      if (
+        !payload.top_gainers?.length &&
+        !payload.top_losers?.length &&
+        !payload.most_actively_traded?.length
+      ) {
+        this.logger.warn('Alpha Vantage returned no market mover data');
+        return null;
+      }
+
+      return {
+        metadata: payload.metadata ?? '',
+        last_updated: payload.last_updated ?? new Date().toISOString(),
+        top_gainers: payload.top_gainers ?? [],
+        top_losers: payload.top_losers ?? [],
+        most_actively_traded: payload.most_actively_traded ?? [],
+      };
+    } catch (error) {
+      this.logger.error('Error fetching Alpha Vantage market movers:', error);
+      return null;
+    }
+  }
+
+  async getAlphaVantageMarketMovers(
+    limitPerCategory = 10,
+  ): Promise<MarketMoversResponse | null> {
+    const payload = await this.fetchAlphaVantageMarketMovers();
+    if (!payload) {
+      return null;
+    }
+
+    const limit = Math.max(1, limitPerCategory);
+
+    const toMarketMover = (stock: AlphaVantageStock): MarketMoverStock => {
+      const price = this.parseNumericString(stock.price) ?? 0;
+      const change = this.parseNumericString(stock.change_amount) ?? 0;
+      const changePercent =
+        this.parseNumericString(stock.change_percentage) ?? 0;
+      const volume = this.parseNumericString(stock.volume);
+
+      return {
+        symbol: stock.ticker,
+        lastPrice: Math.round(price * 100) / 100,
+        change: Math.round(change * 100) / 100,
+        changePercent: Math.round(changePercent * 100) / 100,
+        high: null,
+        low: null,
+        volume: volume !== null ? Math.round(volume) : null,
+      };
+    };
+
+    const topGainers = payload.top_gainers.slice(0, limit).map(toMarketMover);
+    const topLosers = payload.top_losers.slice(0, limit).map(toMarketMover);
+
+    this.logger.log(
+      `Alpha Vantage market movers fetched (${topGainers.length} gainers, ${topLosers.length} losers)`,
+    );
+
+    const timestamp = payload.last_updated
+      ? new Date(payload.last_updated)
+      : new Date();
+
+    return {
+      topGainers,
+      topLosers,
+      timestamp,
+    };
+  }
+
+  async getUSMarketRsi({
+    limitPerCategory = 25,
+    provider,
+    interval = 'daily',
+    timeperiod = 14,
+    timespan = 'day',
+    window,
+    fallback = true,
+  }: {
+    limitPerCategory?: number;
+    provider?: 'polygon' | 'alphaVantage';
+    interval?: AlphaInterval;
+    timeperiod?: number;
+    timespan?: PolygonTimespan;
+    window?: number;
+    fallback?: boolean;
+  } = {}): Promise<USMarketRsiResponse | null> {
+    const payload = await this.fetchAlphaVantageMarketMovers();
+    if (!payload) {
+      return null;
+    }
+
+    const categories: AlphaVantageMoverCategory[] = [
+      'top_gainers',
+      'top_losers',
+      'most_actively_traded',
+    ];
+
+    const limit = Math.max(1, limitPerCategory);
+
+    const categorySymbols: Record<AlphaVantageMoverCategory, string[]> = {
+      top_gainers: [],
+      top_losers: [],
+      most_actively_traded: [],
+    };
+
+    for (const category of categories) {
+      const stocks = payload[category] ?? [];
+      categorySymbols[category] = stocks
+        .slice(0, limit)
+        .map((stock) => stock.ticker.toUpperCase())
+        .filter(Boolean);
+    }
+
+    const uniqueSymbols = Array.from(
+      new Set(categories.flatMap((category) => categorySymbols[category])),
+    );
+
+    this.logger.log(
+      `Fetching RSI for ${uniqueSymbols.length} US tickers from Alpha Vantage movers universe (limit ${limit})`,
+    );
+
+    const signals: RSISignal[] = [];
+    const failedSymbols: string[] = [];
+
+    for (const ticker of uniqueSymbols) {
+      const signal = await this.getRSI(ticker, {
+        provider,
+        interval,
+        timeperiod,
+        timespan,
+        window,
+        fallback,
       });
 
-      const results = await Promise.all(promises);
-      const validResults = results.filter(
-        (r): r is MarketMoverStock => r !== null,
-      );
-
-      if (validResults.length === 0) {
-        this.logger.error('No valid market data obtained');
-        return null;
+      if (signal) {
+        signals.push(signal);
+      } else {
+        failedSymbols.push(ticker);
       }
-
-      // Sort by change percentage
-      const sortedByGain = [...validResults].sort(
-        (a, b) => b.changePercent - a.changePercent,
-      );
-      const topGainers = sortedByGain.slice(0, 10);
-      const topLosers = sortedByGain.slice(-10).reverse();
-
-      this.logger.debug(
-        `Market movers: ${topGainers.length} gainers, ${topLosers.length} losers from ${validResults.length} stocks`,
-      );
-
-      return {
-        topGainers,
-        topLosers,
-        timestamp: new Date(),
-      };
-    } catch (error) {
-      this.logger.error('Error fetching market movers:', error);
-      return null;
     }
-  }
 
-  /**
-   * 5. Get comprehensive technical analysis summary for a symbol
-   */
-  async getComprehensiveSummary(
-    symbol: string,
-  ): Promise<TechnicalAnalysisSummary | null> {
-    try {
-      this.logger.debug(`Getting comprehensive analysis for ${symbol}`);
+    const timestamp = payload.last_updated
+      ? new Date(payload.last_updated)
+      : new Date();
 
-      const [rsi, summary, sr] = await Promise.all([
-        this.getRSI(symbol),
-        this.getTechnicalSummary(symbol),
-        this.getSupportResistance(symbol),
-      ]);
-
-      if (!rsi && !summary && !sr) {
-        this.logger.warn(`No technical data available for ${symbol}`);
-        return null;
-      }
-
-      // Format RSI
-      const rsiString = rsi ? `${rsi.rsi} (${rsi.status})` : 'N/A';
-
-      // Format summary signal
-      const summarySignal = summary?.overallRecommendation || 'neutral';
-
-      // Format support/resistance
-      const supportString =
-        sr?.nearestSupport && sr?.supportDistance
-          ? `${sr.nearestSupport.toFixed(2)} (${sr.supportDistance > 0 ? '+' : ''}${sr.supportDistance.toFixed(1)}%)`
-          : 'N/A';
-
-      const resistanceString =
-        sr?.nearestResistance && sr?.resistanceDistance
-          ? `${sr.nearestResistance.toFixed(2)} (+${sr.resistanceDistance.toFixed(1)}%)`
-          : 'N/A';
-
-      return {
-        symbol,
-        rsi: rsiString,
-        summarySignal,
-        nearestSupport: supportString,
-        nearestResistance: resistanceString,
-      };
-    } catch (error) {
-      this.logger.error(
-        `Error getting comprehensive summary for ${symbol}:`,
-        error,
-      );
-      return null;
-    }
-  }
-
-  /**
-   * Helper: Get current price for a symbol
-   */
-  private async getCurrentPrice(symbol: string): Promise<number | null> {
-    try {
-      const quote = await this.getQuote(symbol);
-      return quote?.c || null;
-    } catch (error) {
-      this.logger.error(`Error getting current price for ${symbol}:`, error);
-      return null;
-    }
-  }
-
-  /**
-   * Helper: Get basic quote data from Finnhub
-   */
-  private async getQuote(symbol: string): Promise<FinnhubQuoteResponse | null> {
-    try {
-      const url = `${this.baseUrl}/quote?symbol=${symbol}&token=${this.finnhubApiKey}`;
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        return null;
-      }
-
-      const data = await this.parseApiResponse<FinnhubQuoteResponse>(response);
-      if (!data) {
-        return null;
-      }
-
-      // Validate required fields
-      if (typeof data.c !== 'number' || typeof data.pc !== 'number') {
-        return null;
-      }
-
-      return data;
-    } catch {
-      return null;
-    }
+    return {
+      timestamp,
+      symbols: signals,
+      failedSymbols,
+      metadata: {
+        limitPerCategory: limit,
+        totalRequested: uniqueSymbols.length,
+        providerPreference: provider ?? 'auto',
+        categories: categorySymbols,
+      },
+    };
   }
 }
