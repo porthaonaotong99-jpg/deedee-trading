@@ -3,9 +3,9 @@ import { CustomerServiceType } from '../entities/customer-service.entity';
 export const ServiceApproveResponseExamples = {
   success: {
     summary: 'Approve brokerage account - success',
-    description: 'Pending brokerage account activated after KYC approval.',
+    description: 'Pending brokerage account approved after KYC review.',
     value: {
-      status: 'activated',
+      status: 'approved',
       service_id: 'd9f9c7d8-4c77-4c21-8b0f-1ea5b5f0a111',
       service_type: CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT,
       kyc_level: 'brokerage',
@@ -13,9 +13,9 @@ export const ServiceApproveResponseExamples = {
   },
   alreadyActive: {
     summary: 'Already active',
-    description: 'Service was previously approved/activated.',
+    description: 'Service was previously approved.',
     value: {
-      status: 'already_active',
+      status: 'approved',
       service_id: 'd9f9c7d8-4c77-4c21-8b0f-1ea5b5f0a111',
       service_type: CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT,
     },

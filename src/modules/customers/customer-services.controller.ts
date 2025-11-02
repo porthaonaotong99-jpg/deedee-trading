@@ -193,7 +193,7 @@ export class CustomerServicesController {
     schema: {
       type: 'object',
       properties: {
-        status: { type: 'string', example: 'activated' },
+        status: { type: 'string', example: 'approved' },
         service_id: { type: 'string', format: 'uuid' },
         service_type: { type: 'string' },
         kyc_level: { type: 'string', example: 'brokerage' },
