@@ -150,7 +150,7 @@ export const ServiceApplyResponseExamples = {
   premiumStockPicksActive: {
     summary: 'Premium Stock Picks - Activated',
     value: {
-      status: 'approved',
+      status: 'activated',
       service_type: CustomerServiceType.PREMIUM_STOCK_PICKS,
       kyc_level: 'basic',
     },
@@ -158,7 +158,7 @@ export const ServiceApplyResponseExamples = {
   premiumActive: {
     summary: 'Premium active',
     value: {
-      status: 'approved',
+      status: 'activated',
       service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
       kyc_level: 'basic',
     },

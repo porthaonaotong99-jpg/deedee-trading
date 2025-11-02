@@ -3,7 +3,6 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
-  UpdateDateColumn,
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
@@ -23,14 +22,6 @@ export enum SubscriptionDuration {
   TWELVE_MONTHS = 12,
 }
 
-export enum CustomerServiceStatus {
-  PENDING_PAYMENT = 'pending_payment',
-  PENDING_ADMIN_APPROVAL = 'pending_admin_approval',
-  PENDING_REVIEW = 'pending_review',
-  APPROVED = 'approved',
-  REJECTED = 'rejected',
-}
-
 @Entity('customer_services')
 export class CustomerService {
   @PrimaryGeneratedColumn('uuid')
@@ -45,13 +36,6 @@ export class CustomerService {
 
   @Column({ type: 'enum', enum: CustomerServiceType })
   service_type: CustomerServiceType;
-
-  @Column({
-    type: 'enum',
-    enum: CustomerServiceStatus,
-    default: CustomerServiceStatus.PENDING_PAYMENT,
-  })
-  status: CustomerServiceStatus;
 
   @Column({ type: 'boolean', default: true })
   active: boolean;
@@ -114,13 +98,4 @@ export class CustomerService {
 
   @CreateDateColumn()
   applied_at: Date;
-
-  @UpdateDateColumn()
-  updated_at: Date;
-
-  @Column({ type: 'timestamp', nullable: true })
-  status_changed_at: Date | null;
-
-  @Column({ type: 'text', nullable: true })
-  rejection_reason: string | null;
 }

@@ -57,6 +57,14 @@ import { CustomerServiceType } from './entities/customer-service.entity';
 import { TopupServiceDto } from './dto/funds.dto';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
 
+type ApplyServiceResult = Awaited<ReturnType<CustomersService['applyService']>>;
+type ApproveServiceResult = Awaited<
+  ReturnType<CustomersService['approveService']>
+>;
+type RejectServiceResult = Awaited<
+  ReturnType<CustomersService['rejectService']>
+>;
+
 @ApiTags('customer-services')
 @ApiExtraModels(ApplyServiceDto, ApplyServiceResponseDto)
 @ApiBearerAuth()
@@ -139,7 +147,7 @@ export class CustomerServicesController {
         }
       : undefined;
 
-    const result = await this.customersService.applyService(
+    const result: ApplyServiceResult = await this.customersService.applyService(
       user.sub,
       dto.service_type,
       {
@@ -193,7 +201,7 @@ export class CustomerServicesController {
     schema: {
       type: 'object',
       properties: {
-        status: { type: 'string', example: 'approved' },
+        status: { type: 'string', example: 'activated' },
         service_id: { type: 'string', format: 'uuid' },
         service_type: { type: 'string' },
         kyc_level: { type: 'string', example: 'brokerage' },
@@ -222,10 +230,8 @@ export class CustomerServicesController {
     // Basic admin gate: require internal user token
     if (user.type !== 'user') throw new ForbiddenException();
 
-    const result = await this.customersService.approveService(
-      serviceId,
-      user.sub,
-    );
+    const result: ApproveServiceResult =
+      await this.customersService.approveService(serviceId, user.sub);
 
     return handleSuccessOne({
       data: {
@@ -289,11 +295,12 @@ export class CustomerServicesController {
     // Basic admin gate: require internal user token
     if (user.type !== 'user') throw new ForbiddenException();
 
-    const result = await this.customersService.rejectService(
-      serviceId,
-      user.sub,
-      body.rejection_reason,
-    );
+    const result: RejectServiceResult =
+      await this.customersService.rejectService(
+        serviceId,
+        user.sub,
+        body.rejection_reason,
+      );
 
     return handleSuccessOne({
       data: {

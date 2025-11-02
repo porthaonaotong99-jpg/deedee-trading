@@ -14,9 +14,7 @@ import * as argon2 from 'argon2';
 import { Customer } from './entities/customer.entity';
 import {
   CustomerService,
-  CustomerServiceStatus,
   CustomerServiceType,
-  SubscriptionDuration,
 } from './entities/customer-service.entity';
 import {
   CustomerKyc,
@@ -54,6 +52,7 @@ import {
 } from './dto/password-reset.dto';
 import type { EmailService } from './interfaces/email.interface';
 
+import { SubscriptionDuration } from './entities/customer-service.entity';
 import type { PaymentProvider } from './services/payment.service';
 import { PaymentRecordService } from '../payments/services/payment-record.service';
 import {
@@ -70,6 +69,22 @@ import {
   ServiceFundTransactionType,
 } from './entities/service-fund-transaction.entity';
 import { TopupServiceDto, TransferFundsDto } from './dto/funds.dto';
+
+type ServiceApplicationStatus = 'approved' | 'rejected' | 'pending' | 'not';
+
+interface ServiceStatusSummary {
+  service_type: CustomerServiceType;
+  status: ServiceApplicationStatus;
+  active: boolean;
+  applied_at: Date | null;
+  subscription_duration?: SubscriptionDuration | null;
+  subscription_expires_at?: Date | null;
+  payment_status?: PaymentStatus | null;
+  payment_updated_at?: Date | null;
+  kyc_status?: KycStatus | null;
+  kyc_level?: KycLevel | null;
+  kyc_reviewed_at?: Date | null;
+}
 
 export interface PendingPremiumMembership {
   service_id: string;
@@ -186,57 +201,208 @@ export class CustomersService {
     });
     if (!entity) throw new NotFoundException('Customer not found');
 
-    // Get all customer services to expose status history to the client profile
-    const services = await this.customerServiceRepo.find({
+    const trackedServiceTypes: CustomerServiceType[] = [
+      CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT,
+      CustomerServiceType.GUARANTEED_RETURNS,
+      CustomerServiceType.PREMIUM_MEMBERSHIP,
+    ];
+
+    const allServices = await this.customerServiceRepo.find({
       where: { customer_id: id },
-      select: {
-        id: true,
-        service_type: true,
-        status: true,
-        active: true,
-        requires_payment: true,
-        subscription_expires_at: true,
-        subscription_duration: true,
-        subscription_fee: true,
-        subscription_package_id: true,
-        applied_at: true,
-        status_changed_at: true,
-        rejection_reason: true,
-      },
       order: { applied_at: 'DESC' },
     });
 
-    const now = new Date();
-    const serviceResponses = services.map((service) => {
-      const isPremium =
-        service.service_type === CustomerServiceType.PREMIUM_MEMBERSHIP;
-      const expired =
-        !!service.subscription_expires_at &&
-        service.subscription_expires_at < now;
-      const canUse =
-        service.active && service.status === CustomerServiceStatus.APPROVED;
+    const latestServiceByType = new Map<CustomerServiceType, CustomerService>();
+    for (const service of allServices) {
+      if (!trackedServiceTypes.includes(service.service_type)) continue;
+      if (!latestServiceByType.has(service.service_type)) {
+        latestServiceByType.set(service.service_type, service);
+      }
+    }
+
+    const kycIds = allServices
+      .map((svc) => svc.kyc_id)
+      .filter((kycId): kycId is string => Boolean(kycId));
+    const uniqueKycIds = Array.from(new Set(kycIds));
+    const kycRecordsById = new Map<string, CustomerKyc>();
+    if (uniqueKycIds.length) {
+      const kycs = await this.customerKycRepo.find({
+        where: { id: In(uniqueKycIds) },
+      });
+      kycs.forEach((record) => kycRecordsById.set(record.id, record));
+    }
+
+    const latestKycByLevel = new Map<KycLevel, CustomerKyc | null>();
+    const getLatestKycForLevel = async (level: KycLevel) => {
+      if (latestKycByLevel.has(level)) {
+        return latestKycByLevel.get(level) ?? null;
+      }
+      const record = await this.customerKycRepo.findOne({
+        where: { customer_id: id, kyc_level: level },
+        order: { created_at: 'DESC' },
+      });
+      latestKycByLevel.set(level, record ?? null);
+      return record ?? null;
+    };
+
+    const mapKycStatusToService = (
+      status?: KycStatus | null,
+    ): ServiceApplicationStatus => {
+      if (!status) return 'pending';
+      switch (status) {
+        case KycStatus.APPROVED:
+          return 'approved';
+        case KycStatus.REJECTED:
+          return 'rejected';
+        case KycStatus.PENDING:
+        case KycStatus.EXPIRED:
+        default:
+          return 'pending';
+      }
+    };
+
+    const mapPaymentStatusToService = (
+      status?: PaymentStatus | null,
+      active?: boolean,
+    ): ServiceApplicationStatus => {
+      if (!status) {
+        return active ? 'approved' : 'pending';
+      }
+      switch (status) {
+        case PaymentStatus.SUCCEEDED:
+          return 'approved';
+        case PaymentStatus.PENDING:
+        case PaymentStatus.PAYMENT_SLIP_SUBMITTED:
+        case PaymentStatus.PROCESSING:
+          return 'pending';
+        case PaymentStatus.FAILED:
+        case PaymentStatus.CANCELED:
+        case PaymentStatus.REFUNDED:
+        case PaymentStatus.PARTIALLY_REFUNDED:
+        default:
+          return 'rejected';
+      }
+    };
+
+    const buildPremiumSummary = async (
+      serviceRecord: CustomerService | null,
+    ): Promise<ServiceStatusSummary> => {
+      if (!serviceRecord) {
+        return {
+          service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+          status: 'not',
+          active: false,
+          applied_at: null,
+          subscription_duration: null,
+          subscription_expires_at: null,
+          payment_status: null,
+          payment_updated_at: null,
+        };
+      }
+
+      const latestPayment = await this.paymentRepo.findOne({
+        where: { service_id: serviceRecord.id },
+        order: { created_at: 'DESC' },
+      });
+
+      const status = mapPaymentStatusToService(
+        latestPayment?.status,
+        serviceRecord.active,
+      );
+
+      const paymentUpdatedAt =
+        latestPayment?.approved_at ??
+        latestPayment?.payment_slip_submitted_at ??
+        latestPayment?.updated_at ??
+        latestPayment?.created_at ??
+        null;
 
       return {
-        id: service.id,
-        service_type: service.service_type,
-        status: service.status,
-        active: service.active,
-        can_use: canUse,
-        requires_payment: service.requires_payment,
-        subscription_fee: service.subscription_fee,
-        subscription_duration: service.subscription_duration,
-        subscription_expires_at: service.subscription_expires_at,
-        subscription_package_id: service.subscription_package_id,
-        expired: isPremium ? expired : undefined,
-        applied_at: service.applied_at,
-        status_changed_at: service.status_changed_at,
-        rejection_reason: service.rejection_reason,
+        service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+        status,
+        active: serviceRecord.active,
+        applied_at: serviceRecord.applied_at,
+        subscription_duration: serviceRecord.subscription_duration,
+        subscription_expires_at: serviceRecord.subscription_expires_at,
+        payment_status: latestPayment?.status ?? null,
+        payment_updated_at: paymentUpdatedAt,
       };
-    });
+    };
+
+    const buildKycDrivenSummary = async (
+      serviceType: CustomerServiceType,
+      serviceRecord: CustomerService | null,
+    ): Promise<ServiceStatusSummary> => {
+      const requiredLevel = this.requiredConfig[serviceType].level;
+
+      if (!serviceRecord) {
+        return {
+          service_type: serviceType,
+          status: 'not',
+          active: false,
+          applied_at: null,
+          kyc_status: null,
+          kyc_level: requiredLevel,
+          kyc_reviewed_at: null,
+        };
+      }
+
+      let kycRecord: CustomerKyc | null = null;
+      if (serviceRecord.kyc_id) {
+        kycRecord = kycRecordsById.get(serviceRecord.kyc_id) ?? null;
+        if (!kycRecord) {
+          kycRecord = await this.customerKycRepo.findOne({
+            where: { id: serviceRecord.kyc_id },
+          });
+          if (kycRecord) {
+            kycRecordsById.set(kycRecord.id, kycRecord);
+          }
+        }
+      }
+
+      if (!kycRecord) {
+        kycRecord = await getLatestKycForLevel(requiredLevel);
+      }
+
+      const status = kycRecord
+        ? mapKycStatusToService(kycRecord.status)
+        : serviceRecord.active
+          ? 'approved'
+          : ('pending' as ServiceApplicationStatus);
+
+      let kycReviewedAt: Date | null = null;
+      if (kycRecord) {
+        kycReviewedAt =
+          kycRecord.reviewed_at ??
+          kycRecord.updated_at ??
+          kycRecord.created_at ??
+          null;
+      }
+
+      return {
+        service_type: serviceType,
+        status,
+        active: serviceRecord.active,
+        applied_at: serviceRecord.applied_at,
+        kyc_status: kycRecord?.status ?? null,
+        kyc_level: kycRecord?.kyc_level ?? requiredLevel,
+        kyc_reviewed_at: kycReviewedAt,
+      };
+    };
+
+    const serviceSummaries: ServiceStatusSummary[] = await Promise.all(
+      trackedServiceTypes.map(async (serviceType) => {
+        const serviceRecord = latestServiceByType.get(serviceType) ?? null;
+        if (serviceType === CustomerServiceType.PREMIUM_MEMBERSHIP) {
+          return buildPremiumSummary(serviceRecord);
+        }
+        return buildKycDrivenSummary(serviceType, serviceRecord);
+      }),
+    );
 
     return {
       ...entity,
-      services: serviceResponses,
+      services: serviceSummaries,
     };
   }
 
@@ -509,10 +675,9 @@ export class CustomersService {
     // 1. Early idempotency check (outside transaction for fast path)
     const existing = await this.customerServiceRepo.findOne({
       where: { customer_id: customerId, service_type: serviceType },
-      order: { applied_at: 'DESC' },
     });
-    if (existing && existing.status !== CustomerServiceStatus.REJECTED) {
-      return { service: existing, status: existing.status };
+    if (existing) {
+      return { service: existing, status: 'already_active' };
     }
 
     // 2. Configuration lookup
@@ -534,16 +699,13 @@ export class CustomersService {
     // 6. Transactional execution to ensure atomicity for all writes
     return this.dataSource.transaction(async (manager) => {
       // Re-check for race condition inside transaction (another tx may have created it)
-      const serviceRepoTx = manager.getRepository(CustomerService);
-      const existingInside = await serviceRepoTx.findOne({
-        where: { customer_id: customerId, service_type: serviceType },
-        order: { applied_at: 'DESC' },
-      });
-      if (
-        existingInside &&
-        existingInside.status !== CustomerServiceStatus.REJECTED
-      ) {
-        return { service: existingInside, status: existingInside.status };
+      const existingInside = await manager
+        .getRepository(CustomerService)
+        .findOne({
+          where: { customer_id: customerId, service_type: serviceType },
+        });
+      if (existingInside) {
+        return { service: existingInside, status: 'already_active' };
       }
 
       // (a) KYC creation / duplication (optional)
@@ -702,40 +864,34 @@ export class CustomersService {
           fee || this.calculateSubscriptionFee(serviceType, duration);
       }
 
-      const initialStatus: CustomerServiceStatus = shouldActivateImmediately
-        ? CustomerServiceStatus.APPROVED
-        : config.requiresPayment
-          ? CustomerServiceStatus.PENDING_PAYMENT
-          : config.requiresAdminApproval
-            ? CustomerServiceStatus.PENDING_ADMIN_APPROVAL
-            : CustomerServiceStatus.PENDING_REVIEW;
-
-      const targetService =
-        existingInside ??
-        serviceRepoTx.create({
-          customer_id: customerId,
-          service_type: serviceType,
-        });
-
-      Object.assign(targetService, {
-        applied_at: new Date(),
+      const service = manager.getRepository(CustomerService).create({
+        customer_id: customerId,
+        service_type: serviceType,
         active: shouldActivateImmediately,
         requires_payment: config.requiresPayment || false,
         subscription_duration: payload?.subscription?.duration || null,
         subscription_expires_at: subscriptionExpiresAt,
         subscription_fee: subscriptionFee,
-        kyc_id: kycRecord?.id || null,
-        status: initialStatus,
-        status_changed_at: new Date(),
-        rejection_reason: null,
+        kyc_id: kycRecord?.id,
       });
+      const savedService = await manager
+        .getRepository(CustomerService)
+        .save(service);
 
-      const savedService = await serviceRepoTx.save(targetService);
+      // Determine final status
+      let finalStatus = 'activated';
+      if (config.requiresPayment) {
+        finalStatus = 'pending_payment';
+      } else if (config.requiresAdminApproval) {
+        finalStatus = 'pending_admin_approval';
+      } else if (hasPendingKyc) {
+        finalStatus = 'pending_review';
+      }
 
       return {
         service: savedService,
         kyc: kycRecord,
-        status: savedService.status,
+        status: finalStatus,
         duplicated_from_kyc_id: duplicatedFromKycId || undefined,
       };
     });
@@ -758,13 +914,7 @@ export class CustomersService {
         throw new NotFoundException('Service application not found');
       }
       if (service.active) {
-        if (service.status !== CustomerServiceStatus.APPROVED) {
-          service.status = CustomerServiceStatus.APPROVED;
-          service.status_changed_at = new Date();
-          service.rejection_reason = null;
-          await svcRepo.save(service);
-        }
-        return { service, status: service.status };
+        return { service, status: 'already_active' };
       }
 
       const config = this.requiredConfig[service.service_type];
@@ -800,12 +950,7 @@ export class CustomersService {
         }
 
         // Activate the service
-        Object.assign(service, {
-          active: true,
-          status: CustomerServiceStatus.APPROVED,
-          status_changed_at: new Date(),
-          rejection_reason: null,
-        });
+        service.active = true;
         const savedService = await svcRepo.save(service);
 
         // Record usage if kyc linked
@@ -844,7 +989,7 @@ export class CustomersService {
 
         return {
           service: savedService,
-          status: savedService.status,
+          status: 'activated',
           payment: successfulPayment,
         };
       }
@@ -861,20 +1006,13 @@ export class CustomersService {
         );
       }
 
-      Object.assign(pendingKyc, {
-        status: KycStatus.APPROVED,
-        reviewed_at: new Date(),
-        reviewed_by: reviewerUserId,
-      });
+      pendingKyc.status = KycStatus.APPROVED;
+      pendingKyc.reviewed_at = new Date();
+      pendingKyc.reviewed_by = reviewerUserId;
       await kycRepo.save(pendingKyc);
 
-      Object.assign(service, {
-        active: true,
-        kyc_id: pendingKyc.id,
-        status: CustomerServiceStatus.APPROVED,
-        status_changed_at: new Date(),
-        rejection_reason: null,
-      });
+      service.active = true;
+      service.kyc_id = pendingKyc.id;
       const savedService = await svcRepo.save(service);
 
       await usageRepo.insert({
@@ -890,11 +1028,7 @@ export class CustomersService {
         },
       });
 
-      return {
-        service: savedService,
-        kyc: pendingKyc,
-        status: savedService.status,
-      };
+      return { service: savedService, kyc: pendingKyc, status: 'activated' };
     });
   }
 
@@ -932,12 +1066,8 @@ export class CustomersService {
           const successfulPayment = paymentRecords[0];
 
           if (successfulPayment) {
-            Object.assign(service, {
-              active: false,
-              status: CustomerServiceStatus.REJECTED,
-              status_changed_at: new Date(),
-              rejection_reason: rejectionReason || null,
-            });
+            // Mark service as rejected (just set active to false)
+            service.active = false;
             const savedService = await svcRepo.save(service);
 
             // Log rejection in payment audit
@@ -959,7 +1089,7 @@ export class CustomersService {
 
             return {
               service: savedService,
-              status: savedService.status,
+              status: 'rejected',
               payment: successfulPayment,
               reason: rejectionReason,
             };
@@ -981,26 +1111,19 @@ export class CustomersService {
           );
         }
 
-        Object.assign(pendingKyc, {
-          status: KycStatus.REJECTED,
-          reviewed_at: new Date(),
-          reviewed_by: reviewerUserId,
-          rejection_reason: rejectionReason || null,
-        });
+        pendingKyc.status = KycStatus.REJECTED;
+        pendingKyc.reviewed_at = new Date();
+        pendingKyc.reviewed_by = reviewerUserId;
+        pendingKyc.rejection_reason = rejectionReason || null;
         await kycRepo.save(pendingKyc);
 
-        Object.assign(service, {
-          active: false,
-          status: CustomerServiceStatus.REJECTED,
-          status_changed_at: new Date(),
-          rejection_reason: rejectionReason || null,
-        });
+        service.active = false;
         const savedService = await svcRepo.save(service);
 
         return {
           service: savedService,
           kyc: pendingKyc,
-          status: savedService.status,
+          status: 'rejected',
           reason: rejectionReason,
         };
       },
@@ -1589,13 +1712,6 @@ export class CustomersService {
       // For premium membership and similar services that require both payment AND admin approval
       // Do NOT activate automatically - keep waiting for admin approval
 
-      Object.assign(service, {
-        status: CustomerServiceStatus.PENDING_ADMIN_APPROVAL,
-        status_changed_at: new Date(),
-        rejection_reason: null,
-      });
-      await this.customerServiceRepo.save(service);
-
       await this.paymentAuditService.logAdminApprovalPending(
         paymentRecord.id,
         paymentRecord.customer_id,
@@ -1613,6 +1729,10 @@ export class CustomersService {
       };
     } else {
       // For services that only require payment (no admin approval), activate immediately
+      await this.customerServiceRepo.update(service.id, {
+        active: true,
+      });
+
       // Log subscription activation
       await this.paymentAuditService.logSubscriptionActivated(
         paymentRecord.id,
@@ -1622,17 +1742,12 @@ export class CustomersService {
         context,
       );
 
-      Object.assign(service, {
-        active: true,
-        status: CustomerServiceStatus.APPROVED,
-        status_changed_at: new Date(),
-        rejection_reason: null,
-      });
-      await this.customerServiceRepo.save(service);
-
       return {
-        status: service.status,
-        service,
+        status: 'activated',
+        service: {
+          ...service,
+          active: true,
+        },
         payment_id: paymentIntentId,
         payment_record: paymentRecord,
       };
@@ -2300,7 +2415,7 @@ export class CustomersService {
       context,
     );
 
-    if (renewalResult.status === CustomerServiceStatus.APPROVED) {
+    if (renewalResult.status === 'activated') {
       // When renewal is approved, deactivate the old service
       const renewalService = renewalResult.service;
 
@@ -2326,7 +2441,7 @@ export class CustomersService {
 
       return {
         ...renewalResult,
-        renewal_status: 'activated' as const,
+        status: 'renewal_activated',
         deactivated_services: servicesToDeactivate.map((s) => s.id),
       };
     }
@@ -2347,7 +2462,7 @@ export class CustomersService {
 
     return {
       ...rejectionResult,
-      renewal_status: 'rejected' as const,
+      status: 'renewal_rejected',
     };
   }
 
