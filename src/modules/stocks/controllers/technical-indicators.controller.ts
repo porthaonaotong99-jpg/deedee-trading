@@ -7,6 +7,7 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { TechnicalIndicatorsService } from '../services/technical-indicators.service';
+import type { FinnhubResolution } from '../services/technical-indicators.types';
 import {
   handleError,
   handleSuccessOne,
@@ -473,6 +474,99 @@ export class TechnicalIndicatorsController {
       return handleError({
         code: 'ALL_STOCK_MOVERS_ERROR',
         message: 'Failed to retrieve ALL US stock market movers',
+        error,
+        statusCode: 500,
+      });
+    }
+  }
+
+  @Get('market-movers/us-losers/breaking-support')
+  @ApiOperation({
+    summary: 'Get US losers breaking support levels',
+    description:
+      'Filters US stock market losers that are trading at or below nearby support levels using Finnhub support/resistance data.',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Maximum number of symbols to return',
+    example: 10,
+  })
+  @ApiQuery({
+    name: 'tolerancePercent',
+    required: false,
+    description:
+      'Maximum percentage distance from the detected level to consider a support breach (default 8%)',
+    example: 8,
+  })
+  @ApiQuery({
+    name: 'minDropPercent',
+    required: false,
+    description:
+      'Minimum intraday drop percentage required to classify as loser (default 0.5%)',
+    example: 0.5,
+  })
+  @ApiQuery({
+    name: 'resolution',
+    required: false,
+    description:
+      'Finnhub resolution for support/resistance levels (intraday or daily intervals)',
+    example: 'D',
+    enum: ['1', '5', '15', '30', '60', 'D', 'W', 'M'],
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'US losers near or breaking support retrieved successfully',
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Failed to retrieve US losers breaking support',
+  })
+  async getUsLosersBreakingSupport(
+    @Query('limit') limit = '10',
+    @Query('tolerancePercent') tolerancePercent = '8',
+    @Query('minDropPercent') minDropPercent = '0.5',
+    @Query('resolution') resolution: FinnhubResolution = 'D',
+  ) {
+    const parsedLimit = Number(limit) > 0 ? Number(limit) : 10;
+    const parsedToleranceRaw = Number(tolerancePercent);
+    const parsedTolerance = Number.isFinite(parsedToleranceRaw)
+      ? Math.max(0, parsedToleranceRaw)
+      : 8;
+    const parsedDropRaw = Number(minDropPercent);
+    const parsedDrop = Number.isFinite(parsedDropRaw)
+      ? Math.max(0, parsedDropRaw)
+      : 0.5;
+
+    this.logger.debug(
+      `Getting US losers breaking support (limit=${parsedLimit}, tolerance=${parsedTolerance}%, minDrop=${parsedDrop}%, resolution=${resolution})`,
+    );
+
+    try {
+      const result =
+        await this.technicalIndicatorsService.getUSLosersBreakingSupport({
+          limit: parsedLimit,
+          tolerancePercent: parsedTolerance,
+          minDropPercent: parsedDrop,
+          resolution,
+        });
+
+      if (!result) {
+        return handleError({
+          code: 'SUPPORT_BREAK_ERROR',
+          message: 'Failed to find US losers breaking support',
+          statusCode: 500,
+        });
+      }
+
+      return handleSuccessOne({
+        data: result,
+        message: 'US losers near support levels retrieved successfully',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'SUPPORT_BREAK_ERROR',
+        message: 'Failed to retrieve US losers breaking support',
         error,
         statusCode: 500,
       });

@@ -3,12 +3,17 @@ import {
   AlphaVantageMarketMoversResponse,
   AlphaVantageStock,
   AlphaVantageMoverCategory,
+  FinnhubResolution,
+  FinnhubSupportResistanceResponse,
   MarketMoverStock,
   MarketMoversResponse,
   PolygonRsiResponse,
   RSISignal,
+  SupportBreakLoser,
+  SupportBreakLosersResponse,
   USMarketRsiResponse,
 } from './technical-indicators.types';
+import { StockMetadataService } from './stock-metadata.service';
 
 type AlphaInterval =
   | '1min'
@@ -27,8 +32,64 @@ export class TechnicalIndicatorsService {
   private readonly logger = new Logger(TechnicalIndicatorsService.name);
   private readonly alphaVantageApiKey = process.env.ALPHA_VANTAGE_KEY;
   private readonly polygonApiKey = process.env.POLYGON_API_KEY;
+  private readonly finnhubApiKey = process.env.FINNHUB_KEY;
+  private readonly allowedUsExchanges = new Set<string>([
+    'NASDAQ',
+    'NYSE',
+    'NYSEARCA',
+    'NYSEAMERICAN',
+    'NYSEMKT',
+    'AMEX',
+    'CBOE',
+    'BATS',
+    'ARCA',
+    'NASDAQGS',
+    'NASDAQCM',
+    'NASDAQGM',
+    'XNYS',
+    'XNAS',
+    'XNCM',
+    'XNMS',
+    'XASE',
+    'ARCX',
+    'BATSZ',
+    'EDGX',
+    'EDGA',
+    'IEX',
+  ]);
+  private readonly blockedExchangePrefixes = new Set<string>([
+    'OTC',
+    'OTCMKTS',
+    'OTCBB',
+    'OTCPK',
+    'PINK',
+    'TSX',
+    'TSXV',
+    'CSE',
+    'CNQ',
+    'BSE',
+    'NSE',
+    'LON',
+    'ASX',
+    'TSE',
+    'SSE',
+    'SZSE',
+    'HKSE',
+    'SGX',
+    'FOREX',
+    'CRYPTO',
+    'INDEX',
+  ]);
+  private readonly usRegions = new Set<string>([
+    'UNITED STATES',
+    'UNITED STATES OF AMERICA',
+    'USA',
+    'US',
+    'AMERICA',
+  ]);
+  private readonly symbolPattern = /^[A-Z0-9.-]+$/;
 
-  constructor() {
+  constructor(private readonly stockMetadataService: StockMetadataService) {
     if (!this.alphaVantageApiKey && !this.polygonApiKey) {
       this.logger.warn(
         'No market data provider configured. Please set ALPHA_VANTAGE_KEY and/or POLYGON_API_KEY.',
@@ -50,6 +111,287 @@ export class TechnicalIndicatorsService {
     const cleaned = value.replace(/[%,$]/g, '').replace(/,/g, '');
     const parsed = Number.parseFloat(cleaned);
     return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  private roundTo(
+    value: number | null | undefined,
+    decimals = 2,
+  ): number | null {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+    const factor = 10 ** decimals;
+    return Math.round(value * factor) / factor;
+  }
+
+  private parseBooleanString(value?: string): boolean | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+    if (['true', '1', 'yes', 'y'].includes(normalized)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'n'].includes(normalized)) {
+      return false;
+    }
+    return null;
+  }
+
+  private isLikelyUsExchange(value?: string, regionIsUs = false): boolean {
+    if (!value) {
+      return false;
+    }
+    const upper = value.trim().toUpperCase();
+    if (!upper) {
+      return false;
+    }
+    if (this.blockedExchangePrefixes.has(upper)) {
+      return false;
+    }
+    if (this.allowedUsExchanges.has(upper)) {
+      return true;
+    }
+    if (
+      upper.startsWith('NYSE') ||
+      upper.startsWith('NASDAQ') ||
+      upper.startsWith('BATS') ||
+      upper.startsWith('CBOE') ||
+      upper.startsWith('EDGX') ||
+      upper.startsWith('EDGA') ||
+      upper.startsWith('IEX') ||
+      upper.startsWith('ARCX') ||
+      upper.startsWith('XNY') ||
+      upper.startsWith('XNA')
+    ) {
+      return true;
+    }
+    return regionIsUs;
+  }
+
+  private normalizeAlphaVantageTicker(stock: AlphaVantageStock): string | null {
+    const rawTicker = stock.ticker?.trim();
+    if (!rawTicker) {
+      return null;
+    }
+
+    if (this.parseBooleanString(stock.is_etf) === true) {
+      return null;
+    }
+
+    if (this.parseBooleanString(stock.is_actively_trading) === false) {
+      return null;
+    }
+
+    const segments = rawTicker.split(':');
+    let exchangePrefix: string | undefined;
+    let symbolPart = rawTicker;
+
+    if (segments.length > 1) {
+      exchangePrefix = segments[0]?.trim().toUpperCase();
+      symbolPart = segments.slice(1).join(':').trim();
+    }
+
+    const region = stock.region?.trim().toUpperCase();
+    const regionIsUs = region ? this.usRegions.has(region) : false;
+    if (region && !regionIsUs) {
+      return null;
+    }
+
+    if (
+      exchangePrefix &&
+      !this.isLikelyUsExchange(exchangePrefix, regionIsUs) &&
+      !regionIsUs
+    ) {
+      return null;
+    }
+
+    const marketValue = (stock.market ?? stock.exchange ?? '').trim();
+    if (
+      marketValue &&
+      !this.isLikelyUsExchange(marketValue, regionIsUs) &&
+      !regionIsUs
+    ) {
+      return null;
+    }
+
+    const symbol = (symbolPart || rawTicker).toUpperCase();
+    if (!this.symbolPattern.test(symbol)) {
+      return null;
+    }
+
+    return symbol;
+  }
+
+  private filterAlphaVantageStocks<T>(
+    stocks: AlphaVantageStock[] | undefined,
+    limit: number,
+    mapper: (stock: AlphaVantageStock, symbol: string) => T,
+  ): { items: T[]; skipped: string[] } {
+    const items: T[] = [];
+    const skipped: string[] = [];
+    const seenSymbols = new Set<string>();
+
+    for (const stock of stocks ?? []) {
+      const normalizedSymbol = this.normalizeAlphaVantageTicker(stock);
+      if (!normalizedSymbol) {
+        if (stock.ticker) {
+          skipped.push(stock.ticker);
+        }
+        continue;
+      }
+
+      if (seenSymbols.has(normalizedSymbol)) {
+        continue;
+      }
+
+      seenSymbols.add(normalizedSymbol);
+      items.push(mapper(stock, normalizedSymbol));
+
+      if (items.length >= limit) {
+        break;
+      }
+    }
+
+    return { items, skipped };
+  }
+
+  private toMarketMoverStock(
+    stock: AlphaVantageStock,
+    symbol: string,
+  ): MarketMoverStock {
+    const price = this.parseNumericString(stock.price) ?? 0;
+    const change = this.parseNumericString(stock.change_amount) ?? 0;
+    const changePercent = this.parseNumericString(stock.change_percentage) ?? 0;
+    const volume = this.parseNumericString(stock.volume);
+
+    return {
+      symbol,
+      lastPrice: Math.round(price * 100) / 100,
+      change: Math.round(change * 100) / 100,
+      changePercent: Math.round(changePercent * 100) / 100,
+      high: null,
+      low: null,
+      volume: volume !== null ? Math.round(volume) : null,
+    };
+  }
+
+  private async fetchFinnhubSupportResistance(
+    symbol: string,
+    resolution: FinnhubResolution,
+  ): Promise<FinnhubSupportResistanceResponse | null> {
+    if (!this.finnhubApiKey) {
+      this.logger.error(
+        'Finnhub API key not available; support/resistance lookup disabled',
+      );
+      return null;
+    }
+
+    const upperSymbol = symbol.toUpperCase();
+    const url = `https://finnhub.io/api/v1/support-resistance?symbol=${encodeURIComponent(upperSymbol)}&resolution=${resolution}&token=${this.finnhubApiKey}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        this.logger.warn(
+          `Finnhub support/resistance request failed for ${upperSymbol}: ${response.status} ${response.statusText}`,
+        );
+        return null;
+      }
+
+      const payload =
+        (await response.json()) as Partial<FinnhubSupportResistanceResponse>;
+      const levels = Array.isArray(payload.levels)
+        ? payload.levels.filter(
+            (value): value is number =>
+              typeof value === 'number' && Number.isFinite(value),
+          )
+        : [];
+
+      if (!levels.length) {
+        this.logger.debug(
+          `Finnhub returned no support/resistance levels for ${upperSymbol}`,
+        );
+        return null;
+      }
+
+      return {
+        symbol: upperSymbol,
+        levels,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error fetching Finnhub support/resistance for ${upperSymbol}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  private deriveSupportResistance(
+    levels: number[],
+    price: number,
+  ): Pick<
+    SupportBreakLoser,
+    | 'supportLevel'
+    | 'supportLevelSecondary'
+    | 'resistance1'
+    | 'resistance2'
+    | 'belowSupportPercent'
+    | 'distanceToSupportPercent'
+  > {
+    const sorted = levels
+      .filter((value) => typeof value === 'number' && Number.isFinite(value))
+      .sort((a, b) => a - b);
+
+    if (!sorted.length) {
+      return {
+        supportLevel: null,
+        supportLevelSecondary: null,
+        resistance1: null,
+        resistance2: null,
+        belowSupportPercent: null,
+        distanceToSupportPercent: null,
+      };
+    }
+
+    const firstAboveIndex = sorted.findIndex((level) => level >= price);
+    const supportLevel =
+      firstAboveIndex >= 0
+        ? sorted[firstAboveIndex]
+        : sorted[sorted.length - 1];
+    const supportLevelSecondary =
+      firstAboveIndex >= 0
+        ? (sorted[firstAboveIndex + 1] ?? null)
+        : sorted.length > 1
+          ? sorted[sorted.length - 2]
+          : null;
+
+    const resistance1 =
+      firstAboveIndex >= 0 ? (sorted[firstAboveIndex + 1] ?? null) : null;
+    const resistance2 =
+      firstAboveIndex >= 0 ? (sorted[firstAboveIndex + 2] ?? null) : null;
+
+    const deltaPercent =
+      supportLevel !== null && supportLevel !== 0
+        ? ((price - supportLevel) / supportLevel) * 100
+        : null;
+
+    return {
+      supportLevel,
+      supportLevelSecondary,
+      resistance1,
+      resistance2,
+      belowSupportPercent: deltaPercent,
+      distanceToSupportPercent:
+        deltaPercent !== null ? Math.abs(deltaPercent) : null,
+    };
   }
 
   async getAlphaVantageRSI(
@@ -272,27 +614,26 @@ export class TechnicalIndicatorsService {
     }
 
     const limit = Math.max(1, limitPerCategory);
+    const gainersResult = this.filterAlphaVantageStocks(
+      payload.top_gainers,
+      limit,
+      (stock, symbol) => this.toMarketMoverStock(stock, symbol),
+    );
+    const losersResult = this.filterAlphaVantageStocks(
+      payload.top_losers,
+      limit,
+      (stock, symbol) => this.toMarketMoverStock(stock, symbol),
+    );
 
-    const toMarketMover = (stock: AlphaVantageStock): MarketMoverStock => {
-      const price = this.parseNumericString(stock.price) ?? 0;
-      const change = this.parseNumericString(stock.change_amount) ?? 0;
-      const changePercent =
-        this.parseNumericString(stock.change_percentage) ?? 0;
-      const volume = this.parseNumericString(stock.volume);
+    const topGainers = gainersResult.items;
+    const topLosers = losersResult.items;
 
-      return {
-        symbol: stock.ticker,
-        lastPrice: Math.round(price * 100) / 100,
-        change: Math.round(change * 100) / 100,
-        changePercent: Math.round(changePercent * 100) / 100,
-        high: null,
-        low: null,
-        volume: volume !== null ? Math.round(volume) : null,
-      };
-    };
-
-    const topGainers = payload.top_gainers.slice(0, limit).map(toMarketMover);
-    const topLosers = payload.top_losers.slice(0, limit).map(toMarketMover);
+    const skippedTickers = [...gainersResult.skipped, ...losersResult.skipped];
+    if (skippedTickers.length) {
+      this.logger.debug(
+        `Skipped ${skippedTickers.length} non-US or inactive tickers from Alpha Vantage movers: ${skippedTickers.join(', ')}`,
+      );
+    }
 
     this.logger.log(
       `Alpha Vantage market movers fetched (${topGainers.length} gainers, ${topLosers.length} losers)`,
@@ -306,6 +647,155 @@ export class TechnicalIndicatorsService {
       topGainers,
       topLosers,
       timestamp,
+    };
+  }
+
+  async getUSLosersBreakingSupport({
+    limit = 10,
+    tolerancePercent = 8,
+    minDropPercent = 0.5,
+    resolution = 'D',
+  }: {
+    limit?: number;
+    tolerancePercent?: number;
+    minDropPercent?: number;
+    resolution?: FinnhubResolution;
+  } = {}): Promise<SupportBreakLosersResponse | null> {
+    if (!this.finnhubApiKey) {
+      this.logger.error(
+        'Finnhub API key not available; cannot compute US support-break losers',
+      );
+      return null;
+    }
+
+    const normalizedLimit = Math.max(1, limit);
+    const normalizedTolerance = tolerancePercent >= 0 ? tolerancePercent : 1;
+    const normalizedDrop = minDropPercent >= 0 ? minDropPercent : 0;
+
+    const movers = await this.getAlphaVantageMarketMovers(normalizedLimit * 4);
+    if (!movers) {
+      return null;
+    }
+
+    const losers = movers.topLosers ?? [];
+    const inspectionCount = Math.min(losers.length, normalizedLimit * 4);
+    const candidates: SupportBreakLoser[] = [];
+    const skippedSymbols: Array<{ symbol: string; reason: string }> = [];
+    let inspected = 0;
+
+    for (const loser of losers.slice(0, inspectionCount)) {
+      inspected += 1;
+
+      if (loser.changePercent >= 0) {
+        skippedSymbols.push({
+          symbol: loser.symbol,
+          reason: 'NOT_NEGATIVE',
+        });
+        continue;
+      }
+
+      if (
+        normalizedDrop > 0 &&
+        Math.abs(loser.changePercent) < normalizedDrop
+      ) {
+        skippedSymbols.push({
+          symbol: loser.symbol,
+          reason: 'DROP_TOO_SMALL',
+        });
+        continue;
+      }
+
+      const supportData = await this.fetchFinnhubSupportResistance(
+        loser.symbol,
+        resolution,
+      );
+
+      if (!supportData) {
+        skippedSymbols.push({
+          symbol: loser.symbol,
+          reason: 'NO_LEVELS',
+        });
+        continue;
+      }
+
+      const {
+        supportLevel,
+        supportLevelSecondary,
+        resistance1,
+        resistance2,
+        belowSupportPercent,
+        distanceToSupportPercent,
+      } = this.deriveSupportResistance(supportData.levels, loser.lastPrice);
+
+      const nearSupport =
+        belowSupportPercent != null &&
+        belowSupportPercent > 0 &&
+        belowSupportPercent <= normalizedTolerance;
+
+      const breachedSupport =
+        belowSupportPercent != null &&
+        belowSupportPercent <= 0 &&
+        Math.abs(belowSupportPercent) <= normalizedTolerance;
+
+      if (!nearSupport && !breachedSupport) {
+        skippedSymbols.push({
+          symbol: loser.symbol,
+          reason: 'DISTANCE_TOLERANCE',
+        });
+        continue;
+      }
+
+      let companyName: string | null = null;
+      try {
+        const basics = await this.stockMetadataService.getCompanyBasics(
+          loser.symbol,
+        );
+        companyName = basics?.name ?? null;
+      } catch (metadataError) {
+        this.logger.debug(
+          `Company metadata lookup failed for ${loser.symbol}: ${metadataError instanceof Error ? metadataError.message : 'unknown error'}`,
+        );
+      }
+
+      const normalizedSupportLevel = this.roundTo(supportLevel);
+      const normalizedSecondarySupport = this.roundTo(supportLevelSecondary);
+      const normalizedResistance1 = this.roundTo(resistance1);
+      const normalizedResistance2 = this.roundTo(resistance2);
+      const normalizedBelowSupportPercent = this.roundTo(belowSupportPercent);
+      const normalizedDistancePercent = this.roundTo(distanceToSupportPercent);
+
+      candidates.push({
+        symbol: loser.symbol,
+        companyName,
+        lastPrice: loser.lastPrice,
+        changePercent: loser.changePercent,
+        change: loser.change,
+        volume: loser.volume ?? null,
+        supportLevel: normalizedSupportLevel,
+        supportLevelSecondary: normalizedSecondarySupport,
+        resistance1: normalizedResistance1,
+        resistance2: normalizedResistance2,
+        belowSupportPercent: normalizedBelowSupportPercent,
+        distanceToSupportPercent: normalizedDistancePercent,
+      });
+
+      if (candidates.length >= normalizedLimit) {
+        break;
+      }
+    }
+
+    return {
+      timestamp: new Date(),
+      stocks: candidates,
+      metadata: {
+        limitRequested: normalizedLimit,
+        inspected,
+        produced: candidates.length,
+        tolerancePercent: normalizedTolerance,
+        minDropPercent: normalizedDrop,
+        resolution,
+        skippedSymbols,
+      },
     };
   }
 
@@ -344,13 +834,29 @@ export class TechnicalIndicatorsService {
       top_losers: [],
       most_actively_traded: [],
     };
+    const skippedByCategory: Record<AlphaVantageMoverCategory, string[]> = {
+      top_gainers: [],
+      top_losers: [],
+      most_actively_traded: [],
+    };
 
     for (const category of categories) {
-      const stocks = payload[category] ?? [];
-      categorySymbols[category] = stocks
-        .slice(0, limit)
-        .map((stock) => stock.ticker.toUpperCase())
-        .filter(Boolean);
+      const { items, skipped } = this.filterAlphaVantageStocks(
+        payload[category],
+        limit,
+        (_, symbol) => symbol,
+      );
+      categorySymbols[category] = items;
+      skippedByCategory[category] = skipped;
+    }
+
+    const skippedSummary = categories.flatMap(
+      (category) => skippedByCategory[category],
+    );
+    if (skippedSummary.length) {
+      this.logger.debug(
+        `Skipped ${skippedSummary.length} non-US or inactive tickers when building RSI universe: ${skippedSummary.join(', ')}`,
+      );
     }
 
     const uniqueSymbols = Array.from(
@@ -394,6 +900,7 @@ export class TechnicalIndicatorsService {
         totalRequested: uniqueSymbols.length,
         providerPreference: provider ?? 'auto',
         categories: categorySymbols,
+        skippedTickers: skippedByCategory,
       },
     };
   }
