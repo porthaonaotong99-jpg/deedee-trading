@@ -8,7 +8,7 @@ import {
 } from '@nestjs/swagger';
 import { TechnicalIndicatorsService } from '../services/technical-indicators.service';
 import type {
-  FinnhubResolution,
+  PriceResolution,
   StockPriceHistoryRange,
 } from '../services/technical-indicators.types';
 import {
@@ -329,9 +329,9 @@ export class TechnicalIndicatorsController {
   @ApiQuery({
     name: 'supportResolution',
     required: false,
-    description: 'Resolution used for Finnhub support levels',
-    example: 'D',
-    enum: ['1', '5', '15', '30', '60', 'D', 'W', 'M'],
+    description: 'Resolution used to compute support levels',
+    example: 'day',
+    enum: ['day', 'week', 'month'],
   })
   @ApiResponse({ status: 200, description: 'Overview data returned' })
   @ApiResponse({ status: 500, description: 'Failed to build overview' })
@@ -340,22 +340,14 @@ export class TechnicalIndicatorsController {
     @Query('includeRsi') includeRsi?: string,
     @Query('supportResolution') supportResolution?: string,
   ) {
-    const allowedResolutions: FinnhubResolution[] = [
-      '1',
-      '5',
-      '15',
-      '30',
-      '60',
-      'D',
-      'W',
-      'M',
-    ];
+    const allowedResolutions: PriceResolution[] = ['day', 'week', 'month'];
     const include = includeRsi
       ? !['0', 'false', 'no'].includes(includeRsi.trim().toLowerCase())
       : false;
-    const candidateResolution = (supportResolution ?? 'D').toUpperCase();
+    const candidateResolution = (supportResolution ?? 'day').toLowerCase();
     const resolution =
-      allowedResolutions.find((value) => value === candidateResolution) ?? 'D';
+      allowedResolutions.find((value) => value === candidateResolution) ??
+      'day';
 
     try {
       const data = await this.technicalIndicatorsService.getStockOverview(
@@ -401,9 +393,9 @@ export class TechnicalIndicatorsController {
   @ApiQuery({
     name: 'supportResolution',
     required: false,
-    description: 'Resolution used for Finnhub support levels',
-    example: 'D',
-    enum: ['1', '5', '15', '30', '60', 'D', 'W', 'M'],
+    description: 'Resolution used to compute support levels',
+    example: 'day',
+    enum: ['day', 'week', 'month'],
   })
   @ApiResponse({ status: 200, description: 'Price history returned' })
   @ApiResponse({ status: 500, description: 'Failed to fetch price history' })
@@ -419,22 +411,14 @@ export class TechnicalIndicatorsController {
       'YTD',
       '1Y',
     ];
-    const allowedResolutions: FinnhubResolution[] = [
-      '1',
-      '5',
-      '15',
-      '30',
-      '60',
-      'D',
-      'W',
-      'M',
-    ];
+    const allowedResolutions: PriceResolution[] = ['day', 'week', 'month'];
     const candidateRange = (range ?? '6M').toUpperCase();
     const normalizedRange =
       allowedRanges.find((value) => value === candidateRange) ?? '6M';
-    const candidateResolution = (supportResolution ?? 'D').toUpperCase();
+    const candidateResolution = (supportResolution ?? 'day').toLowerCase();
     const resolution =
-      allowedResolutions.find((value) => value === candidateResolution) ?? 'D';
+      allowedResolutions.find((value) => value === candidateResolution) ??
+      'day';
 
     try {
       const data = await this.technicalIndicatorsService.getStockPriceHistory(
@@ -758,7 +742,7 @@ export class TechnicalIndicatorsController {
   @ApiOperation({
     summary: 'Get US losers breaking support levels',
     description:
-      'Filters US stock market losers that are trading at or below nearby support levels using Finnhub support/resistance data.',
+      'Filters US stock market losers that are trading at or below nearby support levels computed from Polygon or Alpha Vantage history.',
   })
   @ApiQuery({
     name: 'limit',
@@ -784,9 +768,9 @@ export class TechnicalIndicatorsController {
     name: 'resolution',
     required: false,
     description:
-      'Finnhub resolution for support/resistance levels (intraday or daily intervals)',
-    example: 'D',
-    enum: ['1', '5', '15', '30', '60', 'D', 'W', 'M'],
+      'Resolution for support/resistance levels (daily, weekly, or monthly aggregates)',
+    example: 'day',
+    enum: ['day', 'week', 'month'],
   })
   @ApiResponse({
     status: 200,
@@ -800,7 +784,7 @@ export class TechnicalIndicatorsController {
     @Query('limit') limit = '10',
     @Query('tolerancePercent') tolerancePercent = '8',
     @Query('minDropPercent') minDropPercent = '0.5',
-    @Query('resolution') resolution: FinnhubResolution = 'D',
+    @Query('resolution') resolution: PriceResolution = 'day',
   ) {
     const parsedLimit = Number(limit) > 0 ? Number(limit) : 10;
     const parsedToleranceRaw = Number(tolerancePercent);

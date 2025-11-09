@@ -3,19 +3,51 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { StockCategory } from '../../stock-categories/entities/stock-category.entity';
 
-interface FinnhubProfile2 {
-  country?: string;
-  currency?: string;
-  exchange?: string;
-  finnhubIndustry?: string; // industry
-  ipo?: string;
-  logo?: string;
-  marketCapitalization?: number;
+interface CompanyProfile {
+  symbol: string;
   name?: string;
-  phone?: string;
-  shareOutstanding?: number;
-  ticker?: string; // symbol
-  weburl?: string;
+  country?: string;
+  sector?: string;
+  industry?: string;
+}
+
+interface FmpProfileRaw {
+  symbol?: string;
+  companyName?: string;
+  country?: string;
+  sector?: string;
+  industry?: string;
+  exchangeShortName?: string;
+  website?: string;
+}
+
+interface PolygonTickerDetailsRaw {
+  ticker?: string;
+  name?: string;
+  locale?: string;
+  market?: string;
+  type?: string;
+  sic_description?: string;
+  industry?: string;
+  primary_exchange?: string;
+  market_cap?: number;
+  homepage_url?: string;
+  branding?: { logo_url?: string | null } | null;
+  share_class_shares_outstanding?: number | null;
+  weighted_shares_outstanding?: number | null;
+  list_date?: string;
+  description?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
+  country?: string;
+}
+
+interface PolygonTickerDetailsResponse {
+  results?: PolygonTickerDetailsRaw | null;
+  status?: string;
+  request_id?: string;
 }
 
 @Injectable()
@@ -66,7 +98,7 @@ export class StockMetadataService {
   // Cache profile lookups to avoid hitting API frequently (TTL simplistic)
   private profileCache = new Map<
     string,
-    { data: FinnhubProfile2; fetchedAt: number }
+    { data: CompanyProfile; fetchedAt: number }
   >();
   private readonly PROFILE_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
 
@@ -80,41 +112,140 @@ export class StockMetadataService {
     return v && v.length > 0 ? v : undefined;
   }
 
-  private async fetchFinnhubProfile(
+  private async fetchFmpProfile(
     symbol: string,
-  ): Promise<FinnhubProfile2 | null> {
-    const apiKey = process.env.FINNHUB_KEY;
+  ): Promise<CompanyProfile | null> {
+    const apiKey = process.env.FMP_API_KEY?.trim();
     if (!apiKey) {
-      this.logger.debug('FINNHUB_KEY missing; cannot classify symbol');
+      this.logger.debug('FMP_API_KEY missing; cannot fetch profile');
       return null;
     }
+
+    const upper = symbol.toUpperCase();
+    const url = `https://financialmodelingprep.com/api/v3/profile/${encodeURIComponent(
+      upper,
+    )}?apikey=${apiKey}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        this.logger.warn(
+          `FMP profile request failed for ${upper} status=${response.status}`,
+        );
+        return null;
+      }
+
+      const payload = (await response.json()) as unknown;
+      if (!Array.isArray(payload) || payload.length === 0) {
+        return null;
+      }
+
+      const raw = payload[0] as FmpProfileRaw | undefined;
+      if (!raw) {
+        return null;
+      }
+
+      return {
+        symbol: upper,
+        name: raw.companyName ?? undefined,
+        country: raw.country ?? undefined,
+        sector: raw.sector ?? undefined,
+        industry: raw.industry ?? raw.sector ?? undefined,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `FMP profile error for ${upper}: ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private async fetchPolygonProfile(
+    symbol: string,
+  ): Promise<CompanyProfile | null> {
+    const apiKey = process.env.POLYGON_API_KEY?.trim();
+    if (!apiKey) {
+      this.logger.debug('POLYGON_API_KEY missing; cannot fetch profile');
+      return null;
+    }
+
+    const upper = symbol.toUpperCase();
+    const url = `https://api.polygon.io/v3/reference/tickers/${encodeURIComponent(
+      upper,
+    )}?apiKey=${apiKey}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        this.logger.warn(
+          `Polygon ticker details request failed for ${upper} status=${response.status}`,
+        );
+        return null;
+      }
+
+      const payload = (await response.json()) as PolygonTickerDetailsResponse;
+      const result = payload?.results;
+      if (!result) {
+        return null;
+      }
+
+      const industry =
+        typeof result.sic_description === 'string'
+          ? result.sic_description
+          : typeof result.industry === 'string'
+            ? result.industry
+            : undefined;
+
+      const country =
+        typeof result.country === 'string'
+          ? result.country
+          : typeof result.locale === 'string'
+            ? result.locale.toUpperCase()
+            : undefined;
+
+      return {
+        symbol: upper,
+        name: result.name ?? undefined,
+        country,
+        sector: result.type ?? undefined,
+        industry,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Polygon profile error for ${upper}: ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private async fetchCompanyProfile(
+    symbol: string,
+  ): Promise<CompanyProfile | null> {
     const upper = symbol.toUpperCase();
     const cached = this.profileCache.get(upper);
     const now = Date.now();
     if (cached && now - cached.fetchedAt < this.PROFILE_TTL_MS) {
       return cached.data;
     }
-    const url = `https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(upper)}&token=${apiKey}`;
-    try {
-      const res = await fetch(url, { method: 'GET' });
-      if (!res.ok) {
-        this.logger.warn(
-          `Finnhub profile2 request failed for ${upper} status=${res.status}`,
-        );
-        return null;
+
+    const sources: Array<() => Promise<CompanyProfile | null>> = [
+      () => this.fetchFmpProfile(upper),
+      () => this.fetchPolygonProfile(upper),
+    ];
+
+    for (const fetcher of sources) {
+      const profile = await fetcher();
+      if (profile) {
+        this.profileCache.set(upper, { data: profile, fetchedAt: now });
+        return profile;
       }
-      const data = (await res.json()) as FinnhubProfile2;
-      if (!data || Object.keys(data).length === 0) {
-        return null;
-      }
-      this.profileCache.set(upper, { data, fetchedAt: now });
-      return data;
-    } catch (e) {
-      this.logger.warn(
-        `Finnhub profile2 error for ${upper}: ${e instanceof Error ? e.message : e}`,
-      );
-      return null;
     }
+
+    return null;
   }
 
   /**
@@ -124,7 +255,7 @@ export class StockMetadataService {
     name?: string;
     country?: string;
   } | null> {
-    const profile = await this.fetchFinnhubProfile(symbol);
+    const profile = await this.fetchCompanyProfile(symbol);
     if (!profile) return null;
     return { name: profile.name, country: profile.country };
   }
@@ -150,10 +281,10 @@ export class StockMetadataService {
       (process.env.ENABLE_CATEGORY_AUTO_CLASSIFY || 'true') === 'true';
     if (!enabled) return null;
 
-    const profile = await this.fetchFinnhubProfile(symbol);
+    const profile = await this.fetchCompanyProfile(symbol);
     if (!profile) return null;
 
-    const rawIndustry = profile.finnhubIndustry;
+    const rawIndustry = profile.industry ?? profile.sector;
     const categoryName = this.normalizeCategory(rawIndustry);
     if (!categoryName) return null;
 
@@ -191,7 +322,7 @@ export class StockMetadataService {
  * 1. When a new symbol is first seen, a placeholder stock row is created with default category 'Uncategorized'.
  * 2. A fire-and-forget call to assignCategoryIfPossible() triggers classifySymbol() here.
  * 3. classifySymbol():
- *    - Fetches Finnhub profile2 (cached for 6h) for sector/industry (finnhubIndustry field).
+ *    - Fetches FMP or Polygon company profile (cached for 6h) for sector/industry context.
  *    - Normalizes raw industry string via categoryMap (substring match) to a broader category (e.g., 'semiconductors' -> 'Technology').
  *    - If no mapping match, uses Title Cased original industry as a category name.
  *    - Ensures (creates if needed) a StockCategory row for the resolved name.

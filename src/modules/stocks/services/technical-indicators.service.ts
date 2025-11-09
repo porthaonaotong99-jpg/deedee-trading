@@ -3,14 +3,11 @@ import {
   AlphaVantageMarketMoversResponse,
   AlphaVantageStock,
   AlphaVantageMoverCategory,
-  FinnhubResolution,
-  FinnhubSupportResistanceResponse,
   MarketMoverStock,
   MarketMoversResponse,
   PolygonRsiResponse,
+  PriceResolution,
   RSISignal,
-  SupportBreakLoser,
-  SupportBreakLosersResponse,
   StockNewsResponse,
   StockOverviewResponse,
   StockPerformanceEntry,
@@ -19,17 +16,47 @@ import {
   StockPriceHistoryResponse,
   StockPricePoint,
   StockRevenueResponse,
+  SupportBreakLoser,
+  SupportBreakLosersResponse,
   SupportLevelsSnapshot,
   USMarketRsiResponse,
 } from './technical-indicators.types';
 import { StockMetadataService } from './stock-metadata.service';
 import { QuotesService } from './quotes.service';
 
-interface FinnhubCandlePayload {
-  s?: 'ok' | 'no_data';
-  c?: number[];
-  t?: number[];
-  v?: number[];
+interface PolygonAggregatePayload {
+  results?: Array<{
+    c?: number;
+    h?: number;
+    l?: number;
+    o?: number;
+    v?: number;
+    t?: number;
+  }>;
+  status?: string;
+}
+
+interface AlphaVantageDailySeries {
+  [date: string]: {
+    '1. open'?: string;
+    '2. high'?: string;
+    '3. low'?: string;
+    '4. close'?: string;
+    '5. adjusted close'?: string;
+    '6. volume'?: string;
+  };
+}
+
+interface PolygonNewsPayload {
+  results?: Array<{
+    title?: string;
+    description?: string;
+    article_url?: string;
+    image_url?: string;
+    published_utc?: string;
+    publisher?: { name?: string };
+  }>;
+  status?: string;
 }
 
 type AlphaInterval =
@@ -49,7 +76,6 @@ export class TechnicalIndicatorsService {
   private readonly logger = new Logger(TechnicalIndicatorsService.name);
   private readonly alphaVantageApiKey = process.env.ALPHA_VANTAGE_KEY;
   private readonly polygonApiKey = process.env.POLYGON_API_KEY;
-  private readonly finnhubApiKey = process.env.FINNHUB_KEY;
   private readonly allowedUsExchanges = new Set<string>([
     'NASDAQ',
     'NYSE',
@@ -317,116 +343,385 @@ export class TechnicalIndicatorsService {
     };
   }
 
-  private async fetchFinnhubSupportResistance(
+  private mapResolutionToPolygon(resolution: PriceResolution): {
+    multiplier: number;
+    timespan: PolygonTimespan;
+  } {
+    switch (resolution) {
+      case 'week':
+        return { multiplier: 1, timespan: 'week' };
+      case 'month':
+        return { multiplier: 1, timespan: 'month' };
+      default:
+        return { multiplier: 1, timespan: 'day' };
+    }
+  }
+
+  private async fetchPolygonAggregates(
     symbol: string,
-    resolution: FinnhubResolution,
-  ): Promise<FinnhubSupportResistanceResponse | null> {
-    if (!this.finnhubApiKey) {
-      this.logger.error(
-        'Finnhub API key not available; support/resistance lookup disabled',
-      );
+    resolution: PriceResolution,
+    from: number,
+    to: number,
+  ): Promise<StockPricePoint[] | null> {
+    if (!this.polygonApiKey) {
       return null;
     }
 
-    const upperSymbol = symbol.toUpperCase();
-    const url = `https://finnhub.io/api/v1/support-resistance?symbol=${encodeURIComponent(upperSymbol)}&resolution=${resolution}&token=${this.finnhubApiKey}`;
+    const upper = symbol.toUpperCase();
+    const { multiplier, timespan } = this.mapResolutionToPolygon(resolution);
+    const fromMs = Math.max(0, from * 1000);
+    const toMs = Math.max(fromMs + 60_000, to * 1000);
+    const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(upper)}/range/${multiplier}/${timespan}/${fromMs}/${toMs}?adjusted=true&sort=asc&limit=50000&apiKey=${this.polygonApiKey}`;
 
     try {
       const response = await fetch(url);
       if (!response.ok) {
         this.logger.warn(
-          `Finnhub support/resistance request failed for ${upperSymbol}: ${response.status} ${response.statusText}`,
+          `Polygon aggregates request failed for ${upper}: ${response.status} ${response.statusText}`,
         );
         return null;
       }
 
-      const payload =
-        (await response.json()) as Partial<FinnhubSupportResistanceResponse>;
-      const levels = Array.isArray(payload.levels)
-        ? payload.levels.filter(
-            (value): value is number =>
-              typeof value === 'number' && Number.isFinite(value),
-          )
-        : [];
+      const payload = (await response.json()) as PolygonAggregatePayload;
+      const results = Array.isArray(payload?.results) ? payload.results : [];
 
-      if (!levels.length) {
-        this.logger.debug(
-          `Finnhub returned no support/resistance levels for ${upperSymbol}`,
-        );
+      if (!results.length) {
+        this.logger.debug(`Polygon returned no aggregates for ${upper}`);
         return null;
       }
 
-      return {
-        symbol: upperSymbol,
-        levels,
-      };
+      const points: StockPricePoint[] = [];
+      for (const item of results) {
+        const close = item?.c;
+        const timestamp = item?.t;
+        if (typeof close !== 'number' || !Number.isFinite(close)) {
+          continue;
+        }
+        if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) {
+          continue;
+        }
+        const volume = item?.v;
+        points.push({
+          timestamp,
+          date: new Date(timestamp).toISOString(),
+          close: this.roundTo(close, 2) ?? close,
+          volume:
+            typeof volume === 'number' && Number.isFinite(volume)
+              ? Math.round(volume)
+              : null,
+        });
+      }
+
+      points.sort((a, b) => a.timestamp - b.timestamp);
+      return points;
     } catch (error) {
       this.logger.error(
-        `Error fetching Finnhub support/resistance for ${upperSymbol}:`,
+        `Error fetching Polygon aggregates for ${upper}:`,
         error,
       );
       return null;
     }
   }
 
-  private deriveSupportResistance(
-    levels: number[],
-    price: number,
-  ): Pick<
-    SupportBreakLoser,
-    | 'supportLevel'
-    | 'supportLevelSecondary'
-    | 'resistance1'
-    | 'resistance2'
-    | 'belowSupportPercent'
-    | 'distanceToSupportPercent'
-  > {
-    const sorted = levels
-      .filter((value) => typeof value === 'number' && Number.isFinite(value))
-      .sort((a, b) => a - b);
-
-    if (!sorted.length) {
-      return {
-        supportLevel: null,
-        supportLevelSecondary: null,
-        resistance1: null,
-        resistance2: null,
-        belowSupportPercent: null,
-        distanceToSupportPercent: null,
-      };
+  private async fetchAlphaVantageSeries(
+    symbol: string,
+    resolution: PriceResolution,
+    from: number,
+    to: number,
+  ): Promise<StockPricePoint[] | null> {
+    if (!this.alphaVantageApiKey) {
+      return null;
     }
 
-    const firstAboveIndex = sorted.findIndex((level) => level >= price);
-    const supportLevel =
-      firstAboveIndex >= 0
-        ? sorted[firstAboveIndex]
-        : sorted[sorted.length - 1];
-    const supportLevelSecondary =
-      firstAboveIndex >= 0
-        ? (sorted[firstAboveIndex + 1] ?? null)
-        : sorted.length > 1
-          ? sorted[sorted.length - 2]
-          : null;
+    const upper = symbol.toUpperCase();
+    const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${encodeURIComponent(upper)}&outputsize=full&apikey=${this.alphaVantageApiKey}`;
 
-    const resistance1 =
-      firstAboveIndex >= 0 ? (sorted[firstAboveIndex + 1] ?? null) : null;
-    const resistance2 =
-      firstAboveIndex >= 0 ? (sorted[firstAboveIndex + 2] ?? null) : null;
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        this.logger.warn(
+          `Alpha Vantage daily series request failed for ${upper}: ${response.status} ${response.statusText}`,
+        );
+        return null;
+      }
 
-    const deltaPercent =
-      supportLevel !== null && supportLevel !== 0
-        ? ((price - supportLevel) / supportLevel) * 100
+      const payload = (await response.json()) as Record<string, unknown>;
+      if (typeof payload['Error Message'] === 'string') {
+        this.logger.warn(
+          `Alpha Vantage returned error for ${upper}: ${payload['Error Message']}`,
+        );
+        return null;
+      }
+      if (typeof payload['Note'] === 'string') {
+        this.logger.warn(
+          `Alpha Vantage throttle notice for ${upper}: ${payload['Note']}`,
+        );
+        return null;
+      }
+
+      const seriesKey = Object.keys(payload).find((key) =>
+        key.toLowerCase().includes('time series'),
+      );
+      if (!seriesKey) {
+        this.logger.debug(
+          `Alpha Vantage payload missing time series for ${upper}`,
+        );
+        return null;
+      }
+
+      const series = payload[seriesKey];
+      if (!series || typeof series !== 'object') {
+        this.logger.debug(`Alpha Vantage time series invalid for ${upper}`);
+        return null;
+      }
+
+      const fromMs = from * 1000;
+      const toMs = to * 1000;
+
+      const points: StockPricePoint[] = [];
+      for (const [date, values] of Object.entries(
+        series as AlphaVantageDailySeries,
+      )) {
+        const closeRaw = values['5. adjusted close'] ?? values['4. close'];
+        const volumeRaw = values['6. volume'];
+        const closeValue = this.parseNumericString(closeRaw ?? '') ?? null;
+        if (closeValue === null) {
+          continue;
+        }
+        const timestamp = Date.parse(`${date}T00:00:00Z`);
+        if (!Number.isFinite(timestamp)) {
+          continue;
+        }
+        if (timestamp < fromMs || timestamp > toMs) {
+          continue;
+        }
+        const volumeValue = this.parseNumericString(volumeRaw ?? '');
+        points.push({
+          timestamp,
+          date: new Date(timestamp).toISOString(),
+          close: this.roundTo(closeValue, 2) ?? closeValue,
+          volume: volumeValue !== null ? Math.round(volumeValue) : null,
+        });
+      }
+
+      points.sort((a, b) => a.timestamp - b.timestamp);
+
+      if (!points.length) {
+        this.logger.debug(
+          `Alpha Vantage returned no points within range for ${upper}`,
+        );
+        return null;
+      }
+
+      if (resolution === 'day') {
+        return points;
+      }
+
+      return this.aggregateSeries(points, resolution);
+    } catch (error) {
+      this.logger.error(
+        `Error fetching Alpha Vantage daily series for ${upper}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  private aggregateSeries(
+    points: StockPricePoint[],
+    resolution: PriceResolution,
+  ): StockPricePoint[] {
+    if (resolution === 'day' || !points.length) {
+      return points;
+    }
+
+    const buckets = new Map<
+      number,
+      {
+        timestamp: number;
+        close: number;
+        volume: number;
+      }
+    >();
+
+    for (const point of points) {
+      const bucketStart =
+        resolution === 'week'
+          ? this.getWeekStart(point.timestamp)
+          : this.getMonthStart(point.timestamp);
+      const existing = buckets.get(bucketStart);
+      const pointVolume = typeof point.volume === 'number' ? point.volume : 0;
+      if (!existing) {
+        buckets.set(bucketStart, {
+          timestamp: point.timestamp,
+          close: point.close,
+          volume: pointVolume,
+        });
+        continue;
+      }
+
+      if (point.timestamp >= existing.timestamp) {
+        existing.timestamp = point.timestamp;
+        existing.close = point.close;
+      }
+
+      existing.volume += pointVolume;
+    }
+
+    return Array.from(buckets.entries())
+      .map(([, data]) => ({
+        timestamp: data.timestamp,
+        date: new Date(data.timestamp).toISOString(),
+        close: this.roundTo(data.close, 2) ?? data.close,
+        volume: Number.isFinite(data.volume) ? Math.round(data.volume) : null,
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  private getWeekStart(timestamp: number): number {
+    const date = new Date(timestamp);
+    const day = date.getUTCDay();
+    const diff = (day + 6) % 7; // convert so Monday is start of week
+    const start = Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth(),
+      date.getUTCDate(),
+    );
+    return start - diff * 86400 * 1000;
+  }
+
+  private getMonthStart(timestamp: number): number {
+    const date = new Date(timestamp);
+    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+  }
+
+  private async fetchPriceSeries(
+    symbol: string,
+    resolution: PriceResolution,
+    from: number,
+    to: number,
+  ): Promise<{
+    provider: 'polygon' | 'alphaVantage' | null;
+    points: StockPricePoint[];
+    message?: string;
+  }> {
+    let message: string | undefined;
+
+    if (this.polygonApiKey) {
+      const polygonPoints = await this.fetchPolygonAggregates(
+        symbol,
+        resolution,
+        from,
+        to,
+      );
+      if (polygonPoints && polygonPoints.length) {
+        return { provider: 'polygon', points: polygonPoints };
+      }
+      message = 'Polygon aggregates unavailable for requested range';
+    }
+
+    if (this.alphaVantageApiKey) {
+      const alphaPoints = await this.fetchAlphaVantageSeries(
+        symbol,
+        resolution,
+        from,
+        to,
+      );
+      if (alphaPoints && alphaPoints.length) {
+        return {
+          provider: 'alphaVantage',
+          points: alphaPoints,
+          message,
+        };
+      }
+      message = message
+        ? `${message}; Alpha Vantage returned no data`
+        : 'Alpha Vantage returned no data';
+    }
+
+    if (!this.polygonApiKey && !this.alphaVantageApiKey) {
+      message = 'No Polygon or Alpha Vantage API key configured';
+    }
+
+    return { provider: null, points: [], message };
+  }
+
+  private quantile(sorted: number[], q: number): number | null {
+    if (!sorted.length) {
+      return null;
+    }
+    if (q <= 0) {
+      return sorted[0];
+    }
+    if (q >= 1) {
+      return sorted[sorted.length - 1];
+    }
+
+    const position = (sorted.length - 1) * q;
+    const base = Math.floor(position);
+    const rest = position - base;
+    const lower = sorted[base];
+    const upper = sorted[base + 1] ?? lower;
+    return lower + rest * (upper - lower);
+  }
+
+  private buildSupportSnapshot(
+    points: StockPricePoint[],
+    currentPrice?: number | null,
+  ): SupportLevelsSnapshot | null {
+    const closes = points
+      .map((point) => point.close)
+      .filter((value) => typeof value === 'number' && Number.isFinite(value));
+
+    if (!closes.length) {
+      return null;
+    }
+
+    const sorted = [...closes].sort((a, b) => a - b);
+    const latest =
+      typeof currentPrice === 'number' && Number.isFinite(currentPrice)
+        ? currentPrice
+        : (points[points.length - 1]?.close ?? null);
+
+    const supportPrimary = this.quantile(sorted, sorted.length > 1 ? 0.2 : 0);
+    const supportSecondary = this.quantile(
+      sorted,
+      sorted.length > 2 ? 0.35 : 0,
+    );
+    const resistancePrimary = this.quantile(
+      sorted,
+      sorted.length > 1 ? 0.65 : 1,
+    );
+    const resistanceSecondary = this.quantile(
+      sorted,
+      sorted.length > 2 ? 0.85 : 1,
+    );
+
+    const belowSupportPercent =
+      supportPrimary !== null && supportPrimary !== 0 && latest !== null
+        ? ((latest - supportPrimary) / supportPrimary) * 100
         : null;
 
     return {
-      supportLevel,
-      supportLevelSecondary,
-      resistance1,
-      resistance2,
-      belowSupportPercent: deltaPercent,
+      supportLevel:
+        supportPrimary !== null ? this.roundTo(supportPrimary, 2) : null,
+      supportLevelSecondary:
+        supportSecondary !== null ? this.roundTo(supportSecondary, 2) : null,
+      resistance1:
+        resistancePrimary !== null ? this.roundTo(resistancePrimary, 2) : null,
+      resistance2:
+        resistanceSecondary !== null
+          ? this.roundTo(resistanceSecondary, 2)
+          : null,
+      belowSupportPercent:
+        belowSupportPercent !== null
+          ? this.roundTo(belowSupportPercent, 2)
+          : null,
       distanceToSupportPercent:
-        deltaPercent !== null ? Math.abs(deltaPercent) : null,
-    };
+        belowSupportPercent !== null
+          ? this.roundTo(Math.abs(belowSupportPercent), 2)
+          : null,
+    } satisfies SupportLevelsSnapshot;
   }
 
   private readonly performanceTimeframes: Array<{
@@ -445,28 +740,28 @@ export class TechnicalIndicatorsService {
 
   private resolveHistoryRange(range: StockPriceHistoryRange): {
     from: number;
-    resolution: FinnhubResolution;
+    resolution: PriceResolution;
   } {
     const nowSeconds = Math.floor(Date.now() / 1000);
     switch (range) {
       case '1M':
-        return { from: nowSeconds - 30 * 86400, resolution: 'D' };
+        return { from: nowSeconds - 30 * 86400, resolution: 'day' };
       case '3M':
-        return { from: nowSeconds - 90 * 86400, resolution: 'D' };
+        return { from: nowSeconds - 90 * 86400, resolution: 'day' };
       case '6M':
-        return { from: nowSeconds - 180 * 86400, resolution: 'D' };
+        return { from: nowSeconds - 180 * 86400, resolution: 'day' };
       case '1Y':
-        return { from: nowSeconds - 365 * 86400, resolution: 'D' };
+        return { from: nowSeconds - 365 * 86400, resolution: 'day' };
       case 'YTD': {
         const now = new Date();
         const startOfYear = Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0);
         return {
           from: Math.floor(startOfYear / 1000),
-          resolution: 'D',
+          resolution: 'day',
         };
       }
       default:
-        return { from: nowSeconds - 180 * 86400, resolution: 'D' };
+        return { from: nowSeconds - 180 * 86400, resolution: 'day' };
     }
   }
 
@@ -475,72 +770,37 @@ export class TechnicalIndicatorsService {
     return Math.floor(Date.now() / 1000) - 400 * 86400;
   }
 
-  private async fetchFinnhubCandles(
-    symbol: string,
-    resolution: FinnhubResolution,
-    from: number,
-    to: number,
-  ): Promise<FinnhubCandlePayload | null> {
-    if (!this.finnhubApiKey) {
-      return null;
-    }
-
-    const url = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${to}&token=${this.finnhubApiKey}`;
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        this.logger.warn(
-          `Finnhub candle request failed for ${symbol} (${resolution}) status=${response.status}`,
-        );
-        return null;
-      }
-      const payload = (await response.json()) as FinnhubCandlePayload;
-      if (!payload || payload.s !== 'ok') {
-        this.logger.debug(
-          `Finnhub candle payload not ok for ${symbol} (${resolution}) state=${payload?.s}`,
-        );
-        return null;
-      }
-      return payload;
-    } catch (error) {
-      this.logger.error(
-        `Error fetching Finnhub candles for ${symbol} (${resolution})`,
-        error,
-      );
-      return null;
+  private getSupportLookbackSeconds(resolution: PriceResolution): number {
+    switch (resolution) {
+      case 'week':
+        return 3 * 365 * 86400; // approx 3 years
+      case 'month':
+        return 5 * 365 * 86400; // approx 5 years
+      default:
+        return 180 * 86400; // 6 months for daily data
     }
   }
 
-  private mapCandlesToPoints(payload: FinnhubCandlePayload): StockPricePoint[] {
-    const closes = Array.isArray(payload.c) ? payload.c : [];
-    const timestamps = Array.isArray(payload.t) ? payload.t : [];
-    const volumes = Array.isArray(payload.v) ? payload.v : [];
-    const limit = Math.min(closes.length, timestamps.length);
-    const points: StockPricePoint[] = [];
-
-    for (let i = 0; i < limit; i += 1) {
-      const close = closes[i];
-      const ts = timestamps[i];
-      if (typeof close !== 'number' || !Number.isFinite(close)) {
-        continue;
-      }
-      if (typeof ts !== 'number' || !Number.isFinite(ts)) {
-        continue;
-      }
-      const roundedClose = this.roundTo(close, 2) ?? close;
-      const volume = volumes[i];
-      points.push({
-        timestamp: ts * 1000,
-        date: new Date(ts * 1000).toISOString(),
-        close: roundedClose,
-        volume:
-          typeof volume === 'number' && Number.isFinite(volume)
-            ? Math.round(volume)
-            : null,
-      });
-    }
-
-    return points.sort((a, b) => a.timestamp - b.timestamp);
+  private async computeSupportSnapshot(
+    symbol: string,
+    resolution: PriceResolution,
+    currentPrice?: number | null,
+  ): Promise<{
+    snapshot: SupportLevelsSnapshot | null;
+    provider: 'polygon' | 'alphaVantage' | null;
+    message?: string;
+  }> {
+    const now = Math.floor(Date.now() / 1000);
+    const from = now - this.getSupportLookbackSeconds(resolution);
+    const history = await this.fetchPriceSeries(symbol, resolution, from, now);
+    const snapshot = history.points.length
+      ? this.buildSupportSnapshot(history.points, currentPrice)
+      : null;
+    return {
+      snapshot,
+      provider: history.provider,
+      message: history.message,
+    };
   }
 
   private findPointAtOrAfter(
@@ -606,13 +866,12 @@ export class TechnicalIndicatorsService {
     symbol: string,
     options?: {
       includeRsi?: boolean;
-      supportResolution?: FinnhubResolution;
+      supportResolution?: PriceResolution;
     },
   ): Promise<StockOverviewResponse> {
     const upper = symbol.toUpperCase();
     const includeRsi = options?.includeRsi ?? false;
-    const supportResolution = options?.supportResolution ?? 'D';
-    const supportEnabled = !!this.finnhubApiKey;
+    const supportResolution = options?.supportResolution ?? 'day';
 
     const basicsPromise = this.stockMetadataService
       .getCompanyBasics(upper)
@@ -654,33 +913,22 @@ export class TechnicalIndicatorsService {
 
     let support: SupportLevelsSnapshot | null = null;
     let supportMessage: string | undefined;
-    if (!supportEnabled) {
-      supportMessage = 'Finnhub support levels disabled; FINNHUB_KEY missing';
-    } else if (priceSnapshot && priceSnapshot.price !== null) {
-      const currentPrice = priceSnapshot.price;
-      const finnhubLevels = await this.fetchFinnhubSupportResistance(
+    let supportProvider: 'polygon' | 'alphaVantage' | null = null;
+    if (priceSnapshot && priceSnapshot.price !== null) {
+      const supportResult = await this.computeSupportSnapshot(
         upper,
         supportResolution,
+        priceSnapshot.price,
       );
-      if (finnhubLevels) {
-        const derived = this.deriveSupportResistance(
-          finnhubLevels.levels,
-          currentPrice,
-        );
-        support = {
-          supportLevel: this.roundTo(derived.supportLevel, 2),
-          supportLevelSecondary: this.roundTo(derived.supportLevelSecondary, 2),
-          resistance1: this.roundTo(derived.resistance1, 2),
-          resistance2: this.roundTo(derived.resistance2, 2),
-          belowSupportPercent: this.roundTo(derived.belowSupportPercent, 2),
-          distanceToSupportPercent: this.roundTo(
-            derived.distanceToSupportPercent,
-            2,
-          ),
-        };
-      } else {
-        supportMessage = 'No support levels returned by Finnhub';
+      support = supportResult.snapshot;
+      supportProvider = supportResult.provider;
+      supportMessage = supportResult.message;
+      if (!support && !supportMessage) {
+        supportMessage = 'Support levels unavailable for requested resolution';
       }
+    } else {
+      supportMessage =
+        'Support levels unavailable without a valid price snapshot';
     }
 
     let rsi: RSISignal | null = null;
@@ -711,7 +959,7 @@ export class TechnicalIndicatorsService {
       support,
       metadata: {
         supportResolution,
-        supportProviderEnabled: supportEnabled,
+        supportProvider,
         includeRsi,
         timestamp: new Date(),
         message: supportMessage,
@@ -722,7 +970,7 @@ export class TechnicalIndicatorsService {
   async getStockPriceHistory(
     symbol: string,
     range: StockPriceHistoryRange = '6M',
-    supportResolution: FinnhubResolution = 'D',
+    supportResolution: PriceResolution = 'day',
   ): Promise<StockPriceHistoryResponse> {
     const upper = symbol.toUpperCase();
     const basics = await this.stockMetadataService
@@ -731,65 +979,46 @@ export class TechnicalIndicatorsService {
     const { from, resolution } = this.resolveHistoryRange(range);
     const to = Math.floor(Date.now() / 1000);
 
-    const baseResponse: StockPriceHistoryResponse = {
+    const disabled = !this.polygonApiKey && !this.alphaVantageApiKey;
+    const history = await this.fetchPriceSeries(upper, resolution, from, to);
+
+    const response: StockPriceHistoryResponse = {
       symbol: upper,
       companyName: basics?.name ?? null,
       range,
       resolution,
-      provider: 'finnhub',
-      points: [],
+      provider: history.provider,
+      points: history.points,
       metadata: {
         from,
         to,
-        count: 0,
-        disabled: !this.finnhubApiKey,
-        message: undefined,
+        count: history.points.length,
+        disabled,
+        message: history.message,
       },
     };
 
-    if (!this.finnhubApiKey) {
-      baseResponse.metadata.message =
-        'Finnhub API key not configured; cannot fetch price history';
-      return baseResponse;
-    }
-
-    const candles = await this.fetchFinnhubCandles(upper, resolution, from, to);
-    if (!candles) {
-      baseResponse.metadata.message =
-        'No candle data returned from Finnhub for requested range';
-      return baseResponse;
-    }
-
-    const points = this.mapCandlesToPoints(candles);
-    baseResponse.points = points;
-    baseResponse.metadata.count = points.length;
-
-    const latestClose = points.length ? points[points.length - 1].close : null;
-    if (latestClose !== null && this.finnhubApiKey) {
-      const supportLevels = await this.fetchFinnhubSupportResistance(
+    if (history.points.length) {
+      const latestClose = history.points[history.points.length - 1]?.close;
+      const supportResult = await this.computeSupportSnapshot(
         upper,
         supportResolution,
+        latestClose,
       );
-      if (supportLevels) {
-        const derived = this.deriveSupportResistance(
-          supportLevels.levels,
-          latestClose,
-        );
-        baseResponse.support = {
-          supportLevel: this.roundTo(derived.supportLevel, 2),
-          supportLevelSecondary: this.roundTo(derived.supportLevelSecondary, 2),
-          resistance1: this.roundTo(derived.resistance1, 2),
-          resistance2: this.roundTo(derived.resistance2, 2),
-          belowSupportPercent: this.roundTo(derived.belowSupportPercent, 2),
-          distanceToSupportPercent: this.roundTo(
-            derived.distanceToSupportPercent,
-            2,
-          ),
-        };
+      response.support = supportResult.snapshot;
+      if (supportResult.message) {
+        response.metadata.message = response.metadata.message
+          ? `${response.metadata.message}; ${supportResult.message}`
+          : supportResult.message;
       }
     }
 
-    return baseResponse;
+    if (!response.metadata.message && disabled) {
+      response.metadata.message =
+        'No Polygon or Alpha Vantage API key configured for price history';
+    }
+
+    return response;
   }
 
   async getStockPerformance(symbol: string): Promise<StockPerformanceResponse> {
@@ -800,43 +1029,35 @@ export class TechnicalIndicatorsService {
     const from = this.getPerformanceWindowStart();
     const to = Math.floor(Date.now() / 1000);
 
-    const base: StockPerformanceResponse = {
+    const disabled = !this.polygonApiKey && !this.alphaVantageApiKey;
+    const history = await this.fetchPriceSeries(upper, 'day', from, to);
+
+    const response: StockPerformanceResponse = {
       symbol: upper,
       companyName: basics?.name ?? null,
       entries: [],
       latestClose: null,
       metadata: {
-        provider: 'finnhub',
+        provider: history.provider,
         from,
         to,
-        count: 0,
-        disabled: !this.finnhubApiKey,
-        message: undefined,
+        count: history.points.length,
+        disabled,
+        message: history.message,
       },
     };
 
-    if (!this.finnhubApiKey) {
-      base.metadata.message =
-        'Finnhub API key not configured; cannot compute performance';
-      return base;
+    if (!history.points.length) {
+      if (!response.metadata.message && disabled) {
+        response.metadata.message =
+          'No Polygon or Alpha Vantage price data available for performance';
+      }
+      return response;
     }
 
-    const candles = await this.fetchFinnhubCandles(upper, 'D', from, to);
-    if (!candles) {
-      base.metadata.message = 'No candle data returned from Finnhub';
-      return base;
-    }
-
-    const points = this.mapCandlesToPoints(candles);
-    base.metadata.count = points.length;
-    if (!points.length) {
-      base.metadata.message = 'Finnhub returned empty candle series';
-      return base;
-    }
-
-    base.latestClose = points[points.length - 1].close;
-    base.entries = this.buildPerformanceEntries(points);
-    return base;
+    response.latestClose = history.points[history.points.length - 1].close;
+    response.entries = this.buildPerformanceEntries(history.points);
+    return response;
   }
 
   async getStockRevenueSeries(
@@ -936,18 +1157,18 @@ export class TechnicalIndicatorsService {
   async getStockNews(symbol: string, limit = 6): Promise<StockNewsResponse> {
     const upper = symbol.toUpperCase();
     const hasFmpKey = !!process.env.FMP_API_KEY;
-    const hasFinnhubKey = !!this.finnhubApiKey;
+    const hasPolygonKey = !!this.polygonApiKey;
     const metadata = {
-      provider: hasFmpKey ? ('fmp' as const) : ('finnhub' as const),
+      provider: hasFmpKey ? ('fmp' as const) : ('polygon' as const),
       limit,
-      hasApiKey: hasFmpKey || hasFinnhubKey,
+      hasApiKey: hasFmpKey || hasPolygonKey,
       fetchedAt: new Date(),
       message: undefined as string | undefined,
     };
 
-    if (!hasFmpKey && !hasFinnhubKey) {
+    if (!hasFmpKey && !hasPolygonKey) {
       metadata.message =
-        'No news providers configured; set FMP_API_KEY or FINNHUB_KEY';
+        'No news providers configured; set FMP_API_KEY or POLYGON_API_KEY';
       return {
         symbol: upper,
         items: [],
@@ -998,54 +1219,35 @@ export class TechnicalIndicatorsService {
       }
     }
 
-    if (hasFinnhubKey) {
-      const now = new Date();
-      const to = now.toISOString().substring(0, 10);
-      const from = new Date(now.getTime() - 30 * 86400 * 1000)
-        .toISOString()
-        .substring(0, 10);
-      const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(upper)}&from=${from}&to=${to}&token=${this.finnhubApiKey}`;
+    if (hasPolygonKey) {
+      const url = `https://api.polygon.io/v2/reference/news?ticker=${encodeURIComponent(upper)}&order=desc&limit=${limit}&apiKey=${this.polygonApiKey}`;
       try {
         const response = await fetch(url);
         if (response.ok) {
-          const payload = (await response.json()) as Array<
-            Record<string, unknown>
-          >;
-          if (Array.isArray(payload)) {
-            const capped = payload.slice(0, limit);
-            const items = capped.map((item) => {
-              const published =
-                typeof item.datetime === 'number'
-                  ? new Date(item.datetime * 1000).toISOString()
-                  : null;
-              const headline =
-                this.asString(item['headline']) ?? 'Unknown headline';
-              const source = this.asString(item['source']) ?? null;
-              const urlValue = this.asString(item['url']) ?? null;
-              const summary = this.asString(item['summary']) ?? null;
-              const imageUrl = this.asString(item['image']) ?? null;
-              return {
-                headline,
-                source,
-                url: urlValue,
-                summary,
-                publishedAt: published,
-                imageUrl,
-              };
-            });
+          const payload = (await response.json()) as PolygonNewsPayload;
+          const items = (payload.results ?? []).slice(0, limit).map((item) => ({
+            headline: item.title ?? 'Unknown headline',
+            source: item.publisher?.name ?? null,
+            url: item.article_url ?? null,
+            summary: item.description ?? null,
+            publishedAt: item.published_utc ?? null,
+            imageUrl: item.image_url ?? null,
+          }));
 
-            metadata.provider = 'finnhub';
-            return {
-              symbol: upper,
-              items,
-              metadata,
-            };
+          metadata.provider = 'polygon';
+          if (!items.length) {
+            metadata.message = 'Polygon returned no news results';
           }
-        } else {
-          metadata.message = `Finnhub news request failed with status ${response.status}`;
+
+          return {
+            symbol: upper,
+            items,
+            metadata,
+          };
         }
+        metadata.message = `Polygon news request failed with status ${response.status}`;
       } catch (error) {
-        metadata.message = `Error fetching Finnhub news: ${
+        metadata.message = `Error fetching Polygon news: ${
           error instanceof Error ? error.message : error
         }`;
       }
@@ -1318,16 +1520,16 @@ export class TechnicalIndicatorsService {
     limit = 10,
     tolerancePercent = 8,
     minDropPercent = 0.5,
-    resolution = 'D',
+    resolution = 'day',
   }: {
     limit?: number;
     tolerancePercent?: number;
     minDropPercent?: number;
-    resolution?: FinnhubResolution;
+    resolution?: PriceResolution;
   } = {}): Promise<SupportBreakLosersResponse | null> {
-    if (!this.finnhubApiKey) {
+    if (!this.polygonApiKey && !this.alphaVantageApiKey) {
       this.logger.error(
-        'Finnhub API key not available; cannot compute US support-break losers',
+        'No Polygon or Alpha Vantage API key configured; cannot compute support-break losers',
       );
       return null;
     }
@@ -1335,6 +1537,8 @@ export class TechnicalIndicatorsService {
     const normalizedLimit = Math.max(1, limit);
     const normalizedTolerance = tolerancePercent >= 0 ? tolerancePercent : 1;
     const normalizedDrop = minDropPercent >= 0 ? minDropPercent : 0;
+    const now = Math.floor(Date.now() / 1000);
+    const lookbackSeconds = this.getSupportLookbackSeconds(resolution);
 
     const movers = await this.getAlphaVantageMarketMovers(normalizedLimit * 4);
     if (!movers) {
@@ -1369,12 +1573,27 @@ export class TechnicalIndicatorsService {
         continue;
       }
 
-      const supportData = await this.fetchFinnhubSupportResistance(
+      const history = await this.fetchPriceSeries(
         loser.symbol,
         resolution,
+        now - lookbackSeconds,
+        now,
       );
 
-      if (!supportData) {
+      if (!history.points.length) {
+        skippedSymbols.push({
+          symbol: loser.symbol,
+          reason: 'NO_HISTORY',
+        });
+        continue;
+      }
+
+      const snapshot = this.buildSupportSnapshot(
+        history.points,
+        loser.lastPrice,
+      );
+
+      if (!snapshot) {
         skippedSymbols.push({
           symbol: loser.symbol,
           reason: 'NO_LEVELS',
@@ -1389,17 +1608,16 @@ export class TechnicalIndicatorsService {
         resistance2,
         belowSupportPercent,
         distanceToSupportPercent,
-      } = this.deriveSupportResistance(supportData.levels, loser.lastPrice);
+      } = snapshot;
+
+      const delta =
+        typeof belowSupportPercent === 'number' ? belowSupportPercent : null;
 
       const nearSupport =
-        belowSupportPercent != null &&
-        belowSupportPercent > 0 &&
-        belowSupportPercent <= normalizedTolerance;
+        delta !== null && delta > 0 && delta <= normalizedTolerance;
 
       const breachedSupport =
-        belowSupportPercent != null &&
-        belowSupportPercent <= 0 &&
-        Math.abs(belowSupportPercent) <= normalizedTolerance;
+        delta !== null && delta <= 0 && Math.abs(delta) <= normalizedTolerance;
 
       if (!nearSupport && !breachedSupport) {
         skippedSymbols.push({
@@ -1425,7 +1643,7 @@ export class TechnicalIndicatorsService {
       const normalizedSecondarySupport = this.roundTo(supportLevelSecondary);
       const normalizedResistance1 = this.roundTo(resistance1);
       const normalizedResistance2 = this.roundTo(resistance2);
-      const normalizedBelowSupportPercent = this.roundTo(belowSupportPercent);
+      const normalizedBelowSupportPercent = this.roundTo(delta);
       const normalizedDistancePercent = this.roundTo(distanceToSupportPercent);
 
       candidates.push({

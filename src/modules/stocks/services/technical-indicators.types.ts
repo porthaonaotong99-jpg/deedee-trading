@@ -1,12 +1,4 @@
-export type FinnhubResolution =
-  | '1'
-  | '5'
-  | '15'
-  | '30'
-  | '60'
-  | 'D'
-  | 'W'
-  | 'M';
+export type PriceResolution = 'day' | 'week' | 'month';
 
 export interface RSISignal {
   symbol: string;
@@ -44,11 +36,6 @@ export interface AlphaVantageStock {
   exchange?: string;
   is_etf?: string;
   is_actively_trading?: string;
-}
-
-export interface FinnhubSupportResistanceResponse {
-  symbol: string;
-  levels: number[];
 }
 
 export interface AlphaVantageMarketMoversResponse {
@@ -114,7 +101,7 @@ export interface SupportBreakLosersMetadata {
   produced: number;
   tolerancePercent: number;
   minDropPercent: number;
-  resolution: FinnhubResolution;
+  resolution: PriceResolution;
   skippedSymbols: Array<{ symbol: string; reason: string }>;
 }
 
@@ -160,8 +147,8 @@ export interface StockOverviewResponse {
   rsi?: RSISignal | null;
   support?: SupportLevelsSnapshot | null;
   metadata: {
-    supportResolution: FinnhubResolution;
-    supportProviderEnabled: boolean;
+    supportResolution: PriceResolution;
+    supportProvider: 'polygon' | 'alphaVantage' | null;
     includeRsi: boolean;
     timestamp: Date;
     message?: string;
@@ -172,8 +159,8 @@ export interface StockPriceHistoryResponse {
   symbol: string;
   companyName?: string | null;
   range: StockPriceHistoryRange;
-  resolution: FinnhubResolution;
-  provider: 'finnhub';
+  resolution: PriceResolution;
+  provider: 'polygon' | 'alphaVantage' | null;
   points: StockPricePoint[];
   support?: SupportLevelsSnapshot | null;
   metadata: {
@@ -209,7 +196,7 @@ export interface StockPerformanceResponse {
   entries: StockPerformanceEntry[];
   latestClose?: number | null;
   metadata: {
-    provider: 'finnhub';
+    provider: 'polygon' | 'alphaVantage' | null;
     from: number;
     to: number;
     count: number;
@@ -253,7 +240,7 @@ export interface StockNewsResponse {
   symbol: string;
   items: StockNewsItem[];
   metadata: {
-    provider: 'fmp' | 'finnhub';
+    provider: 'fmp' | 'polygon';
     limit: number;
     hasApiKey: boolean;
     fetchedAt: Date;

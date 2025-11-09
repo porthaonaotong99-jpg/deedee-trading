@@ -21,7 +21,6 @@ export type MarketDataProvider =
   | 'polygon'
   | 'iex'
   | 'yahoo'
-  | 'finnhub'
   | 'fmp';
 
 interface ProviderConfig {
@@ -34,7 +33,6 @@ interface PriceFetcherOptions {
   polygon: ProviderConfig;
   iex: ProviderConfig;
   yahoo: ProviderConfig; // does not need api key for basic quote via rapid fallback or unofficial
-  finnhub: ProviderConfig;
   fmp: ProviderConfig;
   primary: MarketDataProvider;
   fallbackOrder: MarketDataProvider[];
@@ -186,13 +184,6 @@ export class ExternalPriceFetcherService {
   private readonly logger = new Logger(ExternalPriceFetcherService.name);
   private readonly primary: MarketDataProvider;
   private readonly fallback: MarketDataProvider[];
-  private readonly finnhubVolumeCache = new Map<
-    string,
-    { volume?: number; ts: number }
-  >();
-  private readonly FINNHUB_FETCH_VOLUME =
-    (process.env.FINNHUB_FETCH_VOLUME || 'true') === 'true';
-  private readonly FINNHUB_VOLUME_TTL_MS = 60_000; // 1 minute cache
 
   constructor() {
     // In a real implementation, inject ConfigService and populate from env.
@@ -209,10 +200,6 @@ export class ExternalPriceFetcherService {
         apiKey: process.env.IEX_CLOUD_KEY,
         enabled: !!process.env.IEX_CLOUD_KEY,
       },
-      finnhub: {
-        apiKey: process.env.FINNHUB_KEY,
-        enabled: !!process.env.FINNHUB_KEY,
-      },
       fmp: {
         apiKey: process.env.FMP_API_KEY,
         enabled: !!process.env.FMP_API_KEY,
@@ -220,14 +207,7 @@ export class ExternalPriceFetcherService {
       yahoo: { enabled: true },
       primary:
         (process.env.MARKET_DATA_PRIMARY as MarketDataProvider) || 'yahoo',
-      fallbackOrder: [
-        'fmp',
-        'finnhub',
-        'alphaVantage',
-        'polygon',
-        'iex',
-        'yahoo',
-      ],
+      fallbackOrder: ['fmp', 'alphaVantage', 'polygon', 'iex', 'yahoo'],
     };
 
     this.primary = opts.primary;
@@ -242,9 +222,6 @@ export class ExternalPriceFetcherService {
     );
     this.logger.log(
       `  Polygon: ${opts.polygon.enabled ? 'ENABLED' : 'DISABLED'} (key: ${opts.polygon.apiKey ? 'SET' : 'NOT SET'})`,
-    );
-    this.logger.log(
-      `  Finnhub: ${opts.finnhub.enabled ? 'ENABLED' : 'DISABLED'} (key: ${opts.finnhub.apiKey ? 'SET' : 'NOT SET'})`,
     );
     this.logger.log(
       `  FMP: ${opts.fmp.enabled ? 'ENABLED' : 'DISABLED'} (key: ${opts.fmp.apiKey ? 'SET' : 'NOT SET'})`,
@@ -310,15 +287,6 @@ export class ExternalPriceFetcherService {
         /* ignore */
       }
     }
-    // Optionally probe Finnhub if key present
-    if (process.env.FINNHUB_KEY) {
-      try {
-        const finnhub = await this.fetchFinnhub(upper);
-        if (finnhub && finnhub.price != null) return true;
-      } catch {
-        /* ignore */
-      }
-    }
     return false;
   }
 
@@ -333,8 +301,6 @@ export class ExternalPriceFetcherService {
         return this.fetchPolygon(symbol);
       case 'iex':
         return this.fetchIEX(symbol);
-      case 'finnhub':
-        return this.fetchFinnhub(symbol);
       case 'fmp':
         return this.fetchFMP(symbol);
       case 'yahoo':
@@ -381,206 +347,6 @@ export class ExternalPriceFetcherService {
       timestamp: new Date(),
     };
   }
-
-  // Finnhub simple quote
-  private async fetchFinnhub(symbol: string): Promise<ExternalQuote | null> {
-    if (!process.env.FINNHUB_KEY) return null;
-    // Use the /quote endpoint for current price snapshot. The previously used /stock/tick
-    // endpoint requires different params and higher plan access; it caused 403 responses.
-    const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(
-      symbol,
-    )}&token=${process.env.FINNHUB_KEY}`;
-    let res: Response;
-    try {
-      res = await fetch(url);
-    } catch {
-      return null;
-    }
-    if (!res.ok) {
-      if (res.status === 403) {
-        this.logger.debug(
-          `Finnhub 403 for ${symbol} – likely invalid/expired key, free plan limit, or disallowed endpoint usage. URL: ${url}`,
-        );
-      }
-      return null;
-    }
-    let json: unknown;
-    try {
-      json = await res.json();
-      console.log({ json });
-    } catch {
-      return null;
-    }
-    if (!json || typeof json !== 'object') return null;
-    const obj = json as Record<string, unknown>;
-    const current = toNumber(obj.c);
-    if (typeof current !== 'number') return null;
-    // Finnhub /quote may include today's cumulative volume in field 'v'. Use it as a baseline.
-    let volume: number | undefined = toNumber(obj.v);
-
-    if (this.FINNHUB_FETCH_VOLUME) {
-      const cached = this.finnhubVolumeCache.get(symbol);
-      const now = Date.now();
-      if (cached && now - cached.ts < this.FINNHUB_VOLUME_TTL_MS) {
-        volume = cached.volume;
-      } else {
-        let obtained = false;
-        try {
-          const todayStart = Math.floor(
-            new Date(
-              new Date().toISOString().substring(0, 10) + 'T00:00:00Z',
-            ).getTime() / 1000,
-          );
-          const nowSec = Math.floor(now / 1000);
-          const candleUrl = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(
-            symbol,
-          )}&resolution=1&from=${todayStart}&to=${nowSec}&token=${process.env.FINNHUB_KEY}`;
-          const candleRes = await fetch(candleUrl);
-          if (candleRes.ok) {
-            interface FinnhubCandleResponse {
-              s?: string;
-              v?: number[];
-            }
-            const candleJson = (await candleRes.json()) as unknown;
-            const candle = candleJson as FinnhubCandleResponse;
-            if (candle && candle.s === 'ok' && Array.isArray(candle.v)) {
-              const sumVol = candle.v.reduce(
-                (acc: number, v: number) =>
-                  typeof v === 'number' ? acc + v : acc,
-                0,
-              );
-              if (Number.isFinite(sumVol) && sumVol > 0) {
-                volume = sumVol;
-                obtained = true;
-                this.finnhubVolumeCache.set(symbol, { volume, ts: now });
-              }
-            } else {
-              this.logger.debug(
-                `Finnhub intraday candle status for ${symbol}: ${candle?.s} url=${candleUrl.replace(/token=[^&]+/, 'token=***')}`,
-              );
-            }
-          } else {
-            this.logger.debug(
-              `Finnhub intraday candle HTTP ${candleRes.status} for ${symbol} url=${candleUrl.replace(/token=[^&]+/, 'token=***')}`,
-            );
-          }
-        } catch (e) {
-          this.logger.debug(
-            `Finnhub intraday volume fetch failed for ${symbol}: ${
-              e instanceof Error ? e.message : e
-            }`,
-          );
-        }
-        // Fallback: daily candle (resolution=D) if we did not obtain a volume
-        if (!obtained) {
-          try {
-            const dayFrom = Math.floor(Date.now() / 1000) - 86400 * 5; // last 5 days window
-            const dayTo = Math.floor(Date.now() / 1000);
-            const dayUrl = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(
-              symbol,
-            )}&resolution=D&from=${dayFrom}&to=${dayTo}&token=${process.env.FINNHUB_KEY}`;
-            const dayRes = await fetch(dayUrl);
-            if (dayRes.ok) {
-              interface FinnhubDailyCandleResponse {
-                s?: string;
-                v?: number[];
-              }
-              // Fetch and parse daily candles (multi-line to satisfy formatting rules)
-              const dayJsonRaw: unknown = await dayRes.json();
-              const dayJson = dayJsonRaw as FinnhubDailyCandleResponse;
-
-              if (
-                dayJson &&
-                dayJson.s === 'ok' &&
-                Array.isArray(dayJson.v) &&
-                dayJson.v.length
-              ) {
-                const latest = dayJson.v[dayJson.v.length - 1];
-                if (typeof latest === 'number' && latest > 0) {
-                  volume = latest;
-                  this.finnhubVolumeCache.set(symbol, {
-                    volume,
-                    ts: Date.now(),
-                  });
-                  obtained = true;
-                }
-              } else {
-                this.logger.debug(
-                  `Finnhub daily candle status for ${symbol}: ${dayJson?.s} url=${dayUrl.replace(/token=[^&]+/, 'token=***')}`,
-                );
-              }
-            } else {
-              this.logger.debug(
-                `Finnhub daily candle HTTP ${dayRes.status} for ${symbol} url=${dayUrl.replace(/token=[^&]+/, 'token=***')}`,
-              );
-            }
-          } catch (e) {
-            this.logger.debug(
-              `Finnhub daily volume fallback failed for ${symbol}: ${
-                e instanceof Error ? e.message : e
-              }`,
-            );
-          }
-        }
-        if (!obtained) {
-          this.logger.debug(
-            `Finnhub volume unavailable after intraday+daily attempts for ${symbol}`,
-          );
-        }
-      }
-    }
-
-    // Cross-provider volume fallback (does not override price): try Yahoo then Alpha Vantage.
-    if (volume == null) {
-      try {
-        const yahooQuote = await this.fetchYahoo(symbol);
-        if (yahooQuote?.volume && yahooQuote.volume > 0) {
-          volume = yahooQuote.volume;
-          this.logger.debug(
-            `Volume fallback from Yahoo for ${symbol}: ${yahooQuote.volume}`,
-          );
-        }
-      } catch (e) {
-        this.logger.debug(
-          `Yahoo volume fallback error for ${symbol}: ${
-            e instanceof Error ? e.message : e
-          }`,
-        );
-      }
-    }
-    if (volume == null) {
-      try {
-        const avQuote = await this.fetchAlphaVantage(symbol);
-        if (avQuote?.volume && avQuote.volume > 0) {
-          volume = avQuote.volume;
-          this.logger.debug(
-            `Volume fallback from AlphaVantage for ${symbol}: ${avQuote.volume}`,
-          );
-        }
-      } catch (e) {
-        this.logger.debug(
-          `AlphaVantage volume fallback error for ${symbol}: ${
-            e instanceof Error ? e.message : e
-          }`,
-        );
-      }
-    }
-
-    return {
-      symbol: symbol.toUpperCase(),
-      price: current,
-      open: toNumber(obj.o),
-      high: toNumber(obj.h),
-      low: toNumber(obj.l),
-      previousClose: toNumber(obj.pc),
-      volume,
-      provider: 'finnhub',
-      timestamp: new Date(
-        typeof obj.t === 'number' ? obj.t * 1000 : Date.now(),
-      ),
-    };
-  }
-
   // Polygon.io last quote endpoint
   private async fetchPolygon(symbol: string): Promise<ExternalQuote | null> {
     if (!process.env.POLYGON_API_KEY) return null;
