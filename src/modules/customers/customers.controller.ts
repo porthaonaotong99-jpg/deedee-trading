@@ -105,7 +105,7 @@ export class CustomersController {
 
   @Get('profile/me')
   @ApiOperation({ summary: 'Get current customer profile (self)' })
-  async profile(@AuthUser() user: JwtPayload) {
+  async profile(@AuthUser() user: JwtPayload): Promise<any> {
     // Only allow when token type is customer
     if (user.type !== 'customer') {
       // Reuse 403 semantics without importing ForbiddenException to keep minimal; could import instead.
