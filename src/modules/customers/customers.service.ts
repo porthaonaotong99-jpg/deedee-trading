@@ -205,6 +205,7 @@ export class CustomersService {
       CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT,
       CustomerServiceType.GUARANTEED_RETURNS,
       CustomerServiceType.PREMIUM_MEMBERSHIP,
+      CustomerServiceType.PREMIUM_STOCK_PICKS,
     ];
 
     const allServices = await this.customerServiceRepo.find({
@@ -1886,11 +1887,11 @@ export class CustomersService {
     const fee = Number(pkg.price);
 
     // Validate payment amount matches subscription fee
-    if (Math.abs(paymentSlipData.payment_amount - fee) > 0.01) {
-      throw new BadRequestException(
-        `Payment amount (${paymentSlipData.payment_amount}) does not match subscription fee (${fee})`,
-      );
-    }
+    // if (Math.abs(paymentSlipData.payment_amount - fee) > 0.01) {
+    //   throw new BadRequestException(
+    //     `Payment amount (${paymentSlipData.payment_amount}) does not match subscription fee (${fee})`,
+    //   );
+    // }
 
     // 2) If applying different package while current subscription not expired -> block
     const now = new Date();
@@ -2199,11 +2200,11 @@ export class CustomersService {
 
     const fee = Number(pkg.price);
 
-    if (Math.abs(paymentSlip.payment_amount - fee) > 0.01) {
-      throw new BadRequestException(
-        `Payment amount (${paymentSlip.payment_amount}) does not match subscription fee (${fee})`,
-      );
-    }
+    // if (Math.abs(paymentSlip.payment_amount - fee) > 0.01) {
+    //   throw new BadRequestException(
+    //     `Payment amount (${paymentSlip.payment_amount}) does not match subscription fee (${fee})`,
+    //   );
+    // }
 
     return this.dataSource.transaction(async (manager) => {
       const serviceRepo = manager.getRepository(CustomerService);
