@@ -123,3 +123,140 @@ export interface SupportBreakLosersResponse {
   stocks: SupportBreakLoser[];
   metadata: SupportBreakLosersMetadata;
 }
+
+export type StockPriceHistoryRange = '1M' | '3M' | '6M' | 'YTD' | '1Y';
+
+export interface StockPricePoint {
+  timestamp: number;
+  date: string;
+  close: number;
+  volume?: number | null;
+}
+
+export interface SupportLevelsSnapshot {
+  supportLevel?: number | null;
+  supportLevelSecondary?: number | null;
+  resistance1?: number | null;
+  resistance2?: number | null;
+  belowSupportPercent?: number | null;
+  distanceToSupportPercent?: number | null;
+}
+
+export interface StockOverviewPrice {
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  marketCap?: string | null;
+  volume?: string | null;
+  provider?: string | null;
+  timestamp?: Date | null;
+}
+
+export interface StockOverviewResponse {
+  symbol: string;
+  companyName?: string | null;
+  country?: string | null;
+  price?: StockOverviewPrice | null;
+  rsi?: RSISignal | null;
+  support?: SupportLevelsSnapshot | null;
+  metadata: {
+    supportResolution: FinnhubResolution;
+    supportProviderEnabled: boolean;
+    includeRsi: boolean;
+    timestamp: Date;
+    message?: string;
+  };
+}
+
+export interface StockPriceHistoryResponse {
+  symbol: string;
+  companyName?: string | null;
+  range: StockPriceHistoryRange;
+  resolution: FinnhubResolution;
+  provider: 'finnhub';
+  points: StockPricePoint[];
+  support?: SupportLevelsSnapshot | null;
+  metadata: {
+    from: number;
+    to: number;
+    count: number;
+    disabled?: boolean;
+    message?: string;
+  };
+}
+
+export type StockPerformanceTimeframe =
+  | '1D'
+  | '1W'
+  | '1M'
+  | '3M'
+  | '6M'
+  | 'YTD'
+  | '1Y';
+
+export interface StockPerformanceEntry {
+  timeframe: StockPerformanceTimeframe;
+  changePercent: number | null;
+  startPrice: number | null;
+  endPrice: number | null;
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+export interface StockPerformanceResponse {
+  symbol: string;
+  companyName?: string | null;
+  entries: StockPerformanceEntry[];
+  latestClose?: number | null;
+  metadata: {
+    provider: 'finnhub';
+    from: number;
+    to: number;
+    count: number;
+    disabled?: boolean;
+    message?: string;
+  };
+}
+
+export interface StockRevenueEntry {
+  period: string;
+  fiscalDateEnding?: string;
+  calendarYear?: string;
+  revenue: number | null;
+  yoyChangePercent: number | null;
+  currency?: string | null;
+}
+
+export interface StockRevenueResponse {
+  symbol: string;
+  companyName?: string | null;
+  series: StockRevenueEntry[];
+  metadata: {
+    provider: 'fmp';
+    limit: number;
+    hasApiKey: boolean;
+    fetchedAt: Date;
+    message?: string;
+  };
+}
+
+export interface StockNewsItem {
+  headline: string;
+  source?: string | null;
+  url?: string | null;
+  summary?: string | null;
+  publishedAt?: string | null;
+  imageUrl?: string | null;
+}
+
+export interface StockNewsResponse {
+  symbol: string;
+  items: StockNewsItem[];
+  metadata: {
+    provider: 'fmp' | 'finnhub';
+    limit: number;
+    hasApiKey: boolean;
+    fetchedAt: Date;
+    message?: string;
+  };
+}

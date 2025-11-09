@@ -7,7 +7,10 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import { TechnicalIndicatorsService } from '../services/technical-indicators.service';
-import type { FinnhubResolution } from '../services/technical-indicators.types';
+import type {
+  FinnhubResolution,
+  StockPriceHistoryRange,
+} from '../services/technical-indicators.types';
 import {
   handleError,
   handleSuccessOne,
@@ -300,6 +303,277 @@ export class TechnicalIndicatorsController {
       return handleError({
         code: 'POLYGON_RSI_ERROR',
         message: 'Failed to retrieve Polygon RSI data',
+        error,
+        statusCode: 500,
+      });
+    }
+  }
+
+  @Get(':symbol/overview')
+  @ApiOperation({
+    summary: 'Get stock overview snapshot',
+    description:
+      'Provides price snapshot, support levels, optional RSI, and company metadata for dashboard views.',
+  })
+  @ApiParam({
+    name: 'symbol',
+    description: 'Stock symbol (e.g., AAPL)',
+    example: 'AAPL',
+  })
+  @ApiQuery({
+    name: 'includeRsi',
+    required: false,
+    description: 'Include RSI indicator in the response',
+    example: 'true',
+  })
+  @ApiQuery({
+    name: 'supportResolution',
+    required: false,
+    description: 'Resolution used for Finnhub support levels',
+    example: 'D',
+    enum: ['1', '5', '15', '30', '60', 'D', 'W', 'M'],
+  })
+  @ApiResponse({ status: 200, description: 'Overview data returned' })
+  @ApiResponse({ status: 500, description: 'Failed to build overview' })
+  async getStockOverview(
+    @Param('symbol') symbol: string,
+    @Query('includeRsi') includeRsi?: string,
+    @Query('supportResolution') supportResolution?: string,
+  ) {
+    const allowedResolutions: FinnhubResolution[] = [
+      '1',
+      '5',
+      '15',
+      '30',
+      '60',
+      'D',
+      'W',
+      'M',
+    ];
+    const include = includeRsi
+      ? !['0', 'false', 'no'].includes(includeRsi.trim().toLowerCase())
+      : false;
+    const candidateResolution = (supportResolution ?? 'D').toUpperCase();
+    const resolution =
+      allowedResolutions.find((value) => value === candidateResolution) ?? 'D';
+
+    try {
+      const data = await this.technicalIndicatorsService.getStockOverview(
+        symbol.toUpperCase(),
+        {
+          includeRsi: include,
+          supportResolution: resolution,
+        },
+      );
+
+      return handleSuccessOne({
+        data,
+        message: 'Stock overview retrieved',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'OVERVIEW_ERROR',
+        message: 'Failed to retrieve stock overview',
+        error,
+        statusCode: 500,
+      });
+    }
+  }
+
+  @Get(':symbol/price-history')
+  @ApiOperation({
+    summary: 'Get price history series with support levels',
+    description:
+      'Returns price history for dashboards with optional support/resistance levels.',
+  })
+  @ApiParam({
+    name: 'symbol',
+    description: 'Stock symbol (e.g., AAPL)',
+    example: 'AAPL',
+  })
+  @ApiQuery({
+    name: 'range',
+    required: false,
+    description: 'Historical range to retrieve',
+    enum: ['1M', '3M', '6M', 'YTD', '1Y'],
+    example: '6M',
+  })
+  @ApiQuery({
+    name: 'supportResolution',
+    required: false,
+    description: 'Resolution used for Finnhub support levels',
+    example: 'D',
+    enum: ['1', '5', '15', '30', '60', 'D', 'W', 'M'],
+  })
+  @ApiResponse({ status: 200, description: 'Price history returned' })
+  @ApiResponse({ status: 500, description: 'Failed to fetch price history' })
+  async getPriceHistory(
+    @Param('symbol') symbol: string,
+    @Query('range') range?: string,
+    @Query('supportResolution') supportResolution?: string,
+  ) {
+    const allowedRanges: StockPriceHistoryRange[] = [
+      '1M',
+      '3M',
+      '6M',
+      'YTD',
+      '1Y',
+    ];
+    const allowedResolutions: FinnhubResolution[] = [
+      '1',
+      '5',
+      '15',
+      '30',
+      '60',
+      'D',
+      'W',
+      'M',
+    ];
+    const candidateRange = (range ?? '6M').toUpperCase();
+    const normalizedRange =
+      allowedRanges.find((value) => value === candidateRange) ?? '6M';
+    const candidateResolution = (supportResolution ?? 'D').toUpperCase();
+    const resolution =
+      allowedResolutions.find((value) => value === candidateResolution) ?? 'D';
+
+    try {
+      const data = await this.technicalIndicatorsService.getStockPriceHistory(
+        symbol.toUpperCase(),
+        normalizedRange,
+        resolution,
+      );
+
+      return handleSuccessOne({
+        data,
+        message: 'Price history retrieved',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'PRICE_HISTORY_ERROR',
+        message: 'Failed to retrieve price history',
+        error,
+        statusCode: 500,
+      });
+    }
+  }
+
+  @Get(':symbol/performance')
+  @ApiOperation({
+    summary: 'Get timeframe performance metrics',
+    description: 'Computes percent change across common dashboard timeframes.',
+  })
+  @ApiParam({
+    name: 'symbol',
+    description: 'Stock symbol (e.g., AAPL)',
+    example: 'AAPL',
+  })
+  @ApiResponse({ status: 200, description: 'Performance metrics returned' })
+  @ApiResponse({ status: 500, description: 'Failed to compute performance' })
+  async getPerformance(@Param('symbol') symbol: string) {
+    try {
+      const data = await this.technicalIndicatorsService.getStockPerformance(
+        symbol.toUpperCase(),
+      );
+
+      return handleSuccessOne({
+        data,
+        message: 'Performance metrics retrieved',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'PERFORMANCE_ERROR',
+        message: 'Failed to retrieve performance metrics',
+        error,
+        statusCode: 500,
+      });
+    }
+  }
+
+  @Get(':symbol/financials/revenue')
+  @ApiOperation({
+    summary: 'Get quarterly revenue series',
+    description:
+      'Fetches quarterly revenue with year-over-year growth for financial charts.',
+  })
+  @ApiParam({
+    name: 'symbol',
+    description: 'Stock symbol (e.g., AAPL)',
+    example: 'AAPL',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Number of quarters to retrieve (max 12)',
+    example: '8',
+  })
+  @ApiResponse({ status: 200, description: 'Revenue series returned' })
+  @ApiResponse({ status: 500, description: 'Failed to fetch revenue data' })
+  async getRevenue(
+    @Param('symbol') symbol: string,
+    @Query('limit') limit = '8',
+  ) {
+    const parsedLimit = Number.isFinite(Number(limit))
+      ? Math.min(Math.max(Number(limit), 1), 12)
+      : 8;
+
+    try {
+      const data = await this.technicalIndicatorsService.getStockRevenueSeries(
+        symbol.toUpperCase(),
+        parsedLimit,
+      );
+
+      return handleSuccessOne({
+        data,
+        message: 'Revenue series retrieved',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'REVENUE_ERROR',
+        message: 'Failed to retrieve revenue series',
+        error,
+        statusCode: 500,
+      });
+    }
+  }
+
+  @Get(':symbol/news')
+  @ApiOperation({
+    summary: 'Get latest company news',
+    description:
+      'Returns relevant news articles for the symbol for dashboard feeds.',
+  })
+  @ApiParam({
+    name: 'symbol',
+    description: 'Stock symbol (e.g., AAPL)',
+    example: 'AAPL',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Maximum number of articles to return (max 20)',
+    example: '6',
+  })
+  @ApiResponse({ status: 200, description: 'News articles returned' })
+  @ApiResponse({ status: 500, description: 'Failed to fetch news' })
+  async getNews(@Param('symbol') symbol: string, @Query('limit') limit = '6') {
+    const parsedLimit = Number.isFinite(Number(limit))
+      ? Math.min(Math.max(Number(limit), 1), 20)
+      : 6;
+
+    try {
+      const data = await this.technicalIndicatorsService.getStockNews(
+        symbol.toUpperCase(),
+        parsedLimit,
+      );
+
+      return handleSuccessOne({
+        data,
+        message: 'News articles retrieved',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'NEWS_ERROR',
+        message: 'Failed to retrieve news articles',
         error,
         statusCode: 500,
       });
