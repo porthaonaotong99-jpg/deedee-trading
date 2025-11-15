@@ -1776,9 +1776,21 @@ export class TechnicalIndicatorsService {
       return null;
     }
 
+    console.log({ rows });
+
     const transformed = rows
       .map((row) => this.mapGoogleSupportBreakRow(row))
-      .filter((row): row is SupportBreakLoser => row !== null);
+      .filter(
+        (row): row is SupportBreakLoser =>
+          row !== null &&
+          row.supportLevel !== null &&
+          row.lastPrice < (row.supportLevel || 0),
+      )
+      .sort((a, b) => {
+        const dropA = a.belowSupportPercent ?? 0;
+        const dropB = b.belowSupportPercent ?? 0;
+        return dropA - dropB;
+      });
 
     if (!transformed.length) {
       this.logger.warn(
