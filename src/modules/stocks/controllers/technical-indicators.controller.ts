@@ -10,6 +10,7 @@ import { TechnicalIndicatorsService } from '../services/technical-indicators.ser
 import type {
   PriceResolution,
   StockPriceHistoryRange,
+  PolygonFinancialTimeframe,
 } from '../services/technical-indicators.types';
 import {
   handleError,
@@ -487,23 +488,56 @@ export class TechnicalIndicatorsController {
   @ApiQuery({
     name: 'limit',
     required: false,
-    description: 'Number of quarters to retrieve (max 12)',
-    example: '8',
+    description: 'Number of filings to retrieve (max 100)',
+    example: '100',
+  })
+  @ApiQuery({
+    name: 'timeframe',
+    required: false,
+    description: 'Financial timeframe to request',
+    example: 'quarterly',
+    enum: ['quarterly', 'annual'],
+  })
+  @ApiQuery({
+    name: 'order',
+    required: false,
+    description: 'Sort order for the filings',
+    example: 'asc',
+    enum: ['asc', 'desc'],
+  })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    description: 'Polygon sort field (defaults to filing_date)',
+    example: 'filing_date',
   })
   @ApiResponse({ status: 200, description: 'Revenue series returned' })
   @ApiResponse({ status: 500, description: 'Failed to fetch revenue data' })
   async getRevenue(
     @Param('symbol') symbol: string,
-    @Query('limit') limit = '8',
+    @Query('limit') limit = '100',
+    @Query('timeframe') timeframe: PolygonFinancialTimeframe = 'quarterly',
+    @Query('order') order: 'asc' | 'desc' = 'asc',
+    @Query('sort') sort = 'filing_date',
   ) {
-    const parsedLimit = Number.isFinite(Number(limit))
-      ? Math.min(Math.max(Number(limit), 1), 12)
-      : 8;
+    const numericLimit = Number(limit);
+    const parsedLimit = Number.isFinite(numericLimit)
+      ? Math.min(Math.max(Math.floor(numericLimit), 1), 100)
+      : 100;
+    const normalizedTimeframe: PolygonFinancialTimeframe =
+      timeframe === 'annual' ? 'annual' : 'quarterly';
+    const normalizedOrder: 'asc' | 'desc' = order === 'desc' ? 'desc' : 'asc';
+    const normalizedSort = sort?.trim() || 'filing_date';
 
     try {
       const data = await this.technicalIndicatorsService.getStockRevenueSeries(
         symbol.toUpperCase(),
-        parsedLimit,
+        {
+          limit: parsedLimit,
+          timeframe: normalizedTimeframe,
+          order: normalizedOrder,
+          sort: normalizedSort,
+        },
       );
 
       return handleSuccessOne({

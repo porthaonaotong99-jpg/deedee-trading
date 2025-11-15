@@ -223,22 +223,55 @@ export interface StockPerformanceResponse {
   };
 }
 
-export interface StockRevenueEntry {
-  period: string;
-  fiscalDateEnding?: string;
-  calendarYear?: string;
-  revenue: number | null;
-  yoyChangePercent: number | null;
-  currency?: string | null;
+export interface PolygonFinancialValue {
+  value?: number | null;
+  unit?: string | null;
+  label?: string | null;
+  order?: number | null;
+}
+
+export type PolygonFinancialSection = Record<string, PolygonFinancialValue>;
+
+export type PolygonFinancialTimeframe = 'quarterly' | 'annual';
+
+export interface PolygonFinancialStatements {
+  income_statement?: PolygonFinancialSection;
+  balance_sheet?: PolygonFinancialSection;
+  cash_flow_statement?: PolygonFinancialSection;
+  comprehensive_income?: PolygonFinancialSection;
+}
+
+export interface PolygonFinancialResult {
+  start_date?: string;
+  end_date?: string;
+  timeframe?: string;
+  fiscal_period?: string;
+  fiscal_year?: string;
+  cik?: string;
+  sic?: string;
+  tickers?: string[];
+  company_name?: string;
+  filing_date?: string;
+  acceptance_datetime?: string;
+  source_filing_url?: string;
+  source_filing_file_url?: string;
+  financials?: PolygonFinancialStatements;
 }
 
 export interface StockRevenueResponse {
   symbol: string;
   companyName?: string | null;
-  series: StockRevenueEntry[];
+  status?: string;
+  request_id?: string;
+  count?: number;
+  next_url?: string | null;
+  results: PolygonFinancialResult[];
   metadata: {
-    provider: 'fmp';
+    provider: 'polygon';
     limit: number;
+    timeframe: PolygonFinancialTimeframe;
+    order: 'asc' | 'desc';
+    sort: string;
     hasApiKey: boolean;
     fetchedAt: Date;
     message?: string;

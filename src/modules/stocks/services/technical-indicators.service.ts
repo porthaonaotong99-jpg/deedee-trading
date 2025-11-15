@@ -15,6 +15,8 @@ import {
   StockPriceHistoryResponse,
   StockPricePoint,
   StockRevenueResponse,
+  PolygonFinancialResult,
+  PolygonFinancialTimeframe,
   SupportBreakLoser,
   SupportBreakLosersResponse,
   SupportLevelsSnapshot,
@@ -1398,21 +1400,39 @@ export class TechnicalIndicatorsService {
 
   async getStockRevenueSeries(
     symbol: string,
-    limit = 8,
+    options?: {
+      limit?: number;
+      timeframe?: PolygonFinancialTimeframe;
+      order?: 'asc' | 'desc';
+      sort?: string;
+    },
   ): Promise<StockRevenueResponse> {
     const upper = symbol.toUpperCase();
     const basics = await this.stockMetadataService
       .getCompanyBasics(upper)
       .catch(() => null);
-    const hasApiKey = !!process.env.FMP_API_KEY;
+    const hasApiKey = Boolean(this.polygonApiKey);
+    const {
+      limit = 100,
+      timeframe = 'quarterly',
+      order = 'asc',
+      sort = 'filing_date',
+    } = options ?? {};
 
     const base: StockRevenueResponse = {
       symbol: upper,
       companyName: basics?.name ?? null,
-      series: [],
+      status: undefined,
+      request_id: undefined,
+      count: undefined,
+      next_url: undefined,
+      results: [],
       metadata: {
-        provider: 'fmp',
+        provider: 'polygon',
         limit,
+        timeframe,
+        order,
+        sort,
         hasApiKey,
         fetchedAt: new Date(),
         message: undefined,
@@ -1421,71 +1441,63 @@ export class TechnicalIndicatorsService {
 
     if (!hasApiKey) {
       base.metadata.message =
-        'FMP_API_KEY not configured; cannot fetch revenue';
+        'POLYGON_API_KEY not configured; cannot fetch revenue';
       return base;
     }
 
-    const url = `https://financialmodelingprep.com/api/v3/income-statement/${encodeURIComponent(upper)}?period=quarter&limit=${limit}&apikey=${process.env.FMP_API_KEY}`;
+    const apiKey = this.polygonApiKey as string;
+    const search = new URLSearchParams({
+      ticker: upper,
+      timeframe,
+      order,
+      limit: limit.toString(),
+      sort,
+      apiKey,
+    });
+    const url = `https://api.polygon.io/vX/reference/financials?${search.toString()}`;
 
     try {
       const response = await fetch(url);
       if (!response.ok) {
-        base.metadata.message = `FMP income statement failed with status ${response.status}`;
-        return base;
-      }
-      const payload = (await response.json()) as Array<Record<string, unknown>>;
-      if (!Array.isArray(payload) || !payload.length) {
-        base.metadata.message = 'FMP returned no income statement data';
+        const message = `Polygon financials failed with status ${response.status}`;
+        base.metadata.message = message;
+        this.logger.error(`${message} (symbol=${upper})`);
         return base;
       }
 
-      const series = payload.map((entry, index) => {
-        const revenue = this.normalizeNumeric(entry['revenue']);
-        const currencyValue = entry['reportedCurrency'];
-        const currency = this.asString(currencyValue);
-        const fiscalDate = this.asString(entry['date']);
-        const calendarYear = this.asString(entry['calendarYear']);
-        const periodRaw = this.asString(entry['period']);
-        const periodLabel =
-          calendarYear && periodRaw
-            ? `${calendarYear} ${periodRaw}`
-            : fiscalDate;
+      const payload = (await response.json()) as {
+        results?: PolygonFinancialResult[];
+        status?: string;
+        request_id?: string;
+        count?: number;
+        next_url?: string | null;
+      };
 
-        let yoyChangePercent: number | null = null;
-        const comparison = payload[index + 4];
-        if (comparison) {
-          const comparisonRevenue = this.normalizeNumeric(
-            comparison['revenue'],
-          );
-          if (revenue !== null && comparisonRevenue) {
-            const delta = revenue - comparisonRevenue;
-            if (comparisonRevenue !== 0) {
-              yoyChangePercent = this.roundTo(
-                (delta / comparisonRevenue) * 100,
-                2,
-              );
-            }
-          }
-        }
+      base.status = payload.status;
+      base.request_id = payload.request_id;
+      base.count = payload.count;
+      base.next_url = payload.next_url ?? null;
+      base.results = Array.isArray(payload.results) ? payload.results : [];
 
-        const periodValue = periodLabel ?? fiscalDate ?? `Index ${index + 1}`;
+      if (!base.results.length) {
+        base.metadata.message = 'Polygon returned no financial data';
+      }
 
-        return {
-          period: periodValue,
-          fiscalDateEnding: fiscalDate,
-          calendarYear,
-          revenue,
-          yoyChangePercent,
-          currency: currency ?? null,
-        };
-      });
+      if (payload.status && payload.status !== 'OK') {
+        const statusMessage = `Polygon responded with status ${payload.status}`;
+        base.metadata.message = base.metadata.message ?? statusMessage;
+        this.logger.warn(`${statusMessage} for ${upper}`);
+      }
 
-      base.series = series;
       return base;
     } catch (error) {
-      base.metadata.message = `Error fetching FMP income statement: ${
-        error instanceof Error ? error.message : error
-      }`;
+      const message =
+        error instanceof Error ? error.message : 'Unknown Polygon fetch error';
+      base.metadata.message = `Error fetching Polygon financials: ${message}`;
+      this.logger.error(
+        `Error fetching Polygon financials for ${upper}: ${message}`,
+        error,
+      );
       return base;
     }
   }
@@ -1548,11 +1560,8 @@ export class TechnicalIndicatorsService {
         url: this.asString(row.url) ?? null,
         publishedAt: this.asString(row.publishedAt) ?? null,
         imageUrl: this.asString(row.image) ?? null,
-        topicTags: this.asString(row.topics)
-          ? this.asString(row.topics)!
-              .split(',')
-              .map((t) => t.trim())
-          : [],
+        topicTags: this.asString(row.topics),
+        sentiment: this.asString(row.sentiment) ?? null,
       }));
 
     if (!items.length) {
