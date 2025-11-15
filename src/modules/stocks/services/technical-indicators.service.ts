@@ -1867,8 +1867,8 @@ export class TechnicalIndicatorsService {
 
     return {
       timestamp: new Date(),
-      oversold,
-      overbought,
+      oversold: oversold.sort((stockA, stockB) => stockA.rsi - stockB.rsi),
+      overbought: overbought.sort((stockA, stockB) => stockB.rsi - stockA.rsi),
       metadata: {
         limitPerBucket: limit,
         inspected: rows.length,
