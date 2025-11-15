@@ -151,212 +151,23 @@ export class TechnicalIndicatorsController {
     }
   }
 
-  @Get(':symbol/rsi/alpha-vantage')
-  @ApiOperation({
-    summary: 'Get RSI for a symbol using Alpha Vantage',
-    description:
-      'Returns RSI value and signal (oversold/neutral/overbought) for a given symbol using Alpha Vantage API',
-  })
-  @ApiParam({
-    name: 'symbol',
-    description: 'Stock symbol (e.g., AAPL)',
-    example: 'AAPL',
-  })
-  @ApiQuery({
-    name: 'interval',
-    required: false,
-    description: 'Time interval',
-    example: 'daily',
-    enum: [
-      '1min',
-      '5min',
-      '15min',
-      '30min',
-      '60min',
-      'daily',
-      'weekly',
-      'monthly',
-    ],
-  })
-  @ApiQuery({
-    name: 'timeperiod',
-    required: false,
-    description: 'RSI time period',
-    example: 14,
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Alpha Vantage RSI data retrieved successfully',
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'No Alpha Vantage RSI data available for symbol',
-  })
-  async getAlphaVantageRSI(
-    @Param('symbol') symbol: string,
-    @Query('interval')
-    interval:
-      | '1min'
-      | '5min'
-      | '15min'
-      | '30min'
-      | '60min'
-      | 'daily'
-      | 'weekly'
-      | 'monthly' = 'daily',
-    @Query('timeperiod') timeperiod = '14',
-  ) {
-    this.logger.debug(
-      `Getting Alpha Vantage RSI for ${symbol} (${interval}, ${timeperiod})`,
-    );
-
-    try {
-      const result = await this.technicalIndicatorsService.getAlphaVantageRSI(
-        symbol.toUpperCase(),
-        interval,
-        Number(timeperiod),
-      );
-
-      if (!result) {
-        return handleError({
-          code: 'NOT_FOUND',
-          message: `No Alpha Vantage RSI data available for ${symbol}`,
-          statusCode: 404,
-        });
-      }
-
-      return handleSuccessOne({
-        data: result,
-        message: 'Alpha Vantage RSI data retrieved successfully',
-      });
-    } catch (error) {
-      return handleError({
-        code: 'ALPHA_RSI_ERROR',
-        message: 'Failed to retrieve Alpha Vantage RSI data',
-        error,
-        statusCode: 500,
-      });
-    }
-  }
-
-  @Get(':symbol/rsi/polygon')
-  @ApiOperation({
-    summary: 'Get RSI for a symbol using Polygon.io',
-    description:
-      'Returns RSI value and signal (oversold/neutral/overbought) for a given symbol using Polygon indicators API',
-  })
-  @ApiParam({
-    name: 'symbol',
-    description: 'Stock symbol (e.g., AAPL)',
-    example: 'AAPL',
-  })
-  @ApiQuery({
-    name: 'timespan',
-    required: false,
-    description: 'Polygon timespan granularity',
-    example: 'day',
-    enum: ['minute', 'hour', 'day', 'week', 'month'],
-  })
-  @ApiQuery({
-    name: 'window',
-    required: false,
-    description: 'Polygon RSI window length',
-    example: 14,
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Polygon RSI data retrieved successfully',
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'No Polygon RSI data available for symbol',
-  })
-  async getPolygonRSI(
-    @Param('symbol') symbol: string,
-    @Query('timespan')
-    timespan: 'minute' | 'hour' | 'day' | 'week' | 'month' = 'day',
-    @Query('window') window = '14',
-  ) {
-    this.logger.debug(
-      `Getting Polygon RSI for ${symbol} (${timespan}, window=${window})`,
-    );
-
-    try {
-      const result = await this.technicalIndicatorsService.getPolygonRSI(
-        symbol.toUpperCase(),
-        timespan,
-        Number(window),
-      );
-
-      if (!result) {
-        return handleError({
-          code: 'NOT_FOUND',
-          message: `No Polygon RSI data available for ${symbol}`,
-          statusCode: 404,
-        });
-      }
-
-      return handleSuccessOne({
-        data: result,
-        message: 'Polygon RSI data retrieved successfully',
-      });
-    } catch (error) {
-      return handleError({
-        code: 'POLYGON_RSI_ERROR',
-        message: 'Failed to retrieve Polygon RSI data',
-        error,
-        statusCode: 500,
-      });
-    }
-  }
-
   @Get(':symbol/overview')
   @ApiOperation({
     summary: 'Get stock overview snapshot',
     description:
-      'Provides price snapshot, support levels, optional RSI, and company metadata for dashboard views.',
+      'Provides support/resistance levels, RSI, moving averages, price, and grouping info from the curated Google Apps Script dataset.',
   })
   @ApiParam({
     name: 'symbol',
     description: 'Stock symbol (e.g., AAPL)',
     example: 'AAPL',
   })
-  @ApiQuery({
-    name: 'includeRsi',
-    required: false,
-    description: 'Include RSI indicator in the response',
-    example: 'true',
-  })
-  @ApiQuery({
-    name: 'supportResolution',
-    required: false,
-    description: 'Resolution used to compute support levels',
-    example: 'day',
-    enum: ['day', 'week', 'month'],
-  })
   @ApiResponse({ status: 200, description: 'Overview data returned' })
   @ApiResponse({ status: 500, description: 'Failed to build overview' })
-  async getStockOverview(
-    @Param('symbol') symbol: string,
-    @Query('includeRsi') includeRsi?: string,
-    @Query('supportResolution') supportResolution?: string,
-  ) {
-    const allowedResolutions: PriceResolution[] = ['day', 'week', 'month'];
-    const include = includeRsi
-      ? !['0', 'false', 'no'].includes(includeRsi.trim().toLowerCase())
-      : false;
-    const candidateResolution = (supportResolution ?? 'day').toLowerCase();
-    const resolution =
-      allowedResolutions.find((value) => value === candidateResolution) ??
-      'day';
-
+  async getStockOverview(@Param('symbol') symbol: string) {
     try {
       const data = await this.technicalIndicatorsService.getStockOverview(
         symbol.toUpperCase(),
-        {
-          includeRsi: include,
-          supportResolution: resolution,
-        },
       );
 
       return handleSuccessOne({
@@ -377,7 +188,7 @@ export class TechnicalIndicatorsController {
   @ApiOperation({
     summary: 'Get price history series with support levels',
     description:
-      'Returns price history for dashboards with optional support/resistance levels.',
+      'Returns raw Polygon aggregate bars for dashboards using configurable date ranges.',
   })
   @ApiParam({
     name: 'symbol',
@@ -387,23 +198,68 @@ export class TechnicalIndicatorsController {
   @ApiQuery({
     name: 'range',
     required: false,
-    description: 'Historical range to retrieve',
+    description:
+      'Fallback historical range when start/end dates are not provided',
     enum: ['1M', '3M', '6M', 'YTD', '1Y'],
-    example: '6M',
+    example: '1M',
   })
   @ApiQuery({
-    name: 'supportResolution',
+    name: 'startDate',
     required: false,
-    description: 'Resolution used to compute support levels',
+    description: 'ISO start date (YYYY-MM-DD). Takes priority over range.',
+    example: '2025-10-14',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    description: 'ISO end date (YYYY-MM-DD). Takes priority over range.',
+    example: '2025-11-14',
+  })
+  @ApiQuery({
+    name: 'multiplier',
+    required: false,
+    description: 'Polygon multiplier for each aggregate bar',
+    example: '1',
+  })
+  @ApiQuery({
+    name: 'timespan',
+    required: false,
+    description: 'Polygon timespan for aggregate bars',
     example: 'day',
-    enum: ['day', 'week', 'month'],
+    enum: ['minute', 'hour', 'day', 'week', 'month'],
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Maximum number of aggregate bars to return (max 50000)',
+    example: '50000',
+  })
+  @ApiQuery({
+    name: 'sort',
+    required: false,
+    description: 'Sort order for the aggregates',
+    enum: ['asc', 'desc'],
+    example: 'asc',
+  })
+  @ApiQuery({
+    name: 'adjusted',
+    required: false,
+    description: 'Use adjusted values (true/false)',
+    example: 'true',
   })
   @ApiResponse({ status: 200, description: 'Price history returned' })
   @ApiResponse({ status: 500, description: 'Failed to fetch price history' })
   async getPriceHistory(
     @Param('symbol') symbol: string,
     @Query('range') range?: string,
-    @Query('supportResolution') supportResolution?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('multiplier') multiplier = '1',
+    @Query('timespan')
+    timespan: 'minute' | 'hour' | 'day' | 'week' | 'month' = 'day',
+    @Query('limit') limit = '50000',
+    @Query('sort') sort: 'asc' | 'desc' = 'asc',
+    @Query('adjusted') adjusted = 'true',
   ) {
     const allowedRanges: StockPriceHistoryRange[] = [
       '1M',
@@ -412,21 +268,37 @@ export class TechnicalIndicatorsController {
       'YTD',
       '1Y',
     ];
-    const allowedResolutions: PriceResolution[] = ['day', 'week', 'month'];
     const candidateRange = (range ?? '6M').toUpperCase();
     const normalizedRange =
       allowedRanges.find((value) => value === candidateRange) ?? '6M';
-    const candidateResolution = (supportResolution ?? 'day').toLowerCase();
-    const resolution =
-      allowedResolutions.find((value) => value === candidateResolution) ??
-      'day';
+    const numericMultiplier = Number(multiplier);
+    const normalizedMultiplier =
+      Number.isFinite(numericMultiplier) && numericMultiplier > 0
+        ? Math.floor(numericMultiplier)
+        : 1;
+    const numericLimit = Number(limit);
+    const normalizedLimit =
+      Number.isFinite(numericLimit) && numericLimit > 0
+        ? Math.min(Math.floor(numericLimit), 50000)
+        : 50000;
+    const normalizedSort: 'asc' | 'desc' = sort === 'desc' ? 'desc' : 'asc';
+    const normalizedAdjusted = adjusted !== 'false';
 
     try {
-      const data = await this.technicalIndicatorsService.getStockPriceHistory(
-        symbol.toUpperCase(),
-        normalizedRange,
-        resolution,
-      );
+      const data =
+        await this.technicalIndicatorsService.getPolygonPriceHistoryBars(
+          symbol.toUpperCase(),
+          {
+            range: normalizedRange,
+            startDate,
+            endDate,
+            multiplier: normalizedMultiplier,
+            timespan,
+            limit: normalizedLimit,
+            sort: normalizedSort,
+            adjusted: normalizedAdjusted,
+          },
+        );
 
       return handleSuccessOne({
         data,

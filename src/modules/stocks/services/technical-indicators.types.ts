@@ -5,7 +5,7 @@ export interface RSISignal {
   rsi: number;
   status: 'oversold' | 'neutral' | 'overbought';
   timestamp: Date;
-  provider: 'alphaVantage' | 'polygon';
+  provider: 'alphaVantage' | 'polygon' | 'google-script';
 }
 
 export interface MarketMoverStock {
@@ -147,27 +147,23 @@ export interface SupportLevelsSnapshot {
   distanceToSupportPercent?: number | null;
 }
 
-export interface StockOverviewPrice {
-  price: number | null;
-  change: number | null;
-  changePercent: number | null;
-  marketCap?: string | null;
-  volume?: string | null;
-  provider?: string | null;
-  timestamp?: Date | null;
-}
-
 export interface StockOverviewResponse {
   symbol: string;
   companyName?: string | null;
-  country?: string | null;
-  price?: StockOverviewPrice | null;
-  rsi?: RSISignal | null;
-  support?: SupportLevelsSnapshot | null;
+  supportLevel: number | null;
+  supportLevelSecondary: number | null;
+  resistance1: number | null;
+  resistance2: number | null;
+  rsi: number | null;
+  ema50: number | null;
+  ema200: number | null;
+  price: number | null;
+  changePrice: number | null;
+  changePercent: number | null;
+  group: string | null;
   metadata: {
-    supportResolution: PriceResolution;
-    supportProvider: 'polygon' | 'alphaVantage' | null;
-    includeRsi: boolean;
+    provider: 'google-script' | null;
+    sourceUrl: string | null;
     timestamp: Date;
     message?: string;
   };
@@ -188,6 +184,17 @@ export interface StockPriceHistoryResponse {
     disabled?: boolean;
     message?: string;
   };
+}
+
+export interface PolygonAggregateBar {
+  v?: number;
+  vw?: number;
+  o?: number;
+  c?: number;
+  h?: number;
+  l?: number;
+  t?: number;
+  n?: number;
 }
 
 export type StockPerformanceTimeframe =

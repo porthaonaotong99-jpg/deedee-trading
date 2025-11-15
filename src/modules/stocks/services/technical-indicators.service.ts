@@ -5,6 +5,7 @@ import {
   MarketMoverStock,
   MarketMoversResponse,
   PolygonRsiResponse,
+  PolygonAggregateBar,
   PriceResolution,
   RSISignal,
   StockNewsResponse,
@@ -24,7 +25,6 @@ import {
   USMarketRsiBucketStock,
 } from './technical-indicators.types';
 import { StockMetadataService } from './stock-metadata.service';
-import { QuotesService } from './quotes.service';
 
 interface PolygonAggregatePayload {
   results?: Array<{
@@ -106,6 +106,11 @@ interface GoogleStockNewsResponse {
   error?: boolean;
   data?: GoogleStockNewsRow[];
   count?: number;
+}
+
+interface GoogleStockOverviewResponse {
+  error?: boolean;
+  data?: GoogleSupportBreakRow | null;
 }
 
 type AlphaInterval =
@@ -191,10 +196,9 @@ export class TechnicalIndicatorsService {
     process.env.US_MARKET_RSI_SOURCE_URL ??
     process.env.ALL_US_RSI_SOURCE_URL ??
     '';
-  constructor(
-    private readonly stockMetadataService: StockMetadataService,
-    private readonly quotesService: QuotesService,
-  ) {
+  private readonly stockOverviewSourceUrl =
+    process.env.STOCK_OVERVIEW_SOURCE_URL ?? '';
+  constructor(private readonly stockMetadataService: StockMetadataService) {
     if (!this.alphaVantageApiKey && !this.polygonApiKey) {
       this.logger.warn(
         'No market data provider configured. Please set ALPHA_VANTAGE_KEY and/or POLYGON_API_KEY.',
@@ -351,6 +355,48 @@ export class TechnicalIndicatorsService {
       return payload.data;
     } catch (error) {
       this.logger.error('Error fetching stock news dataset', error);
+      return null;
+    }
+  }
+
+  private async fetchGoogleStockOverviewRow(
+    symbol: string,
+  ): Promise<GoogleSupportBreakRow | null> {
+    const baseUrl = this.stockOverviewSourceUrl?.trim();
+    if (!baseUrl) {
+      this.logger.error('Stock overview dataset URL not configured');
+      return null;
+    }
+
+    const searchParams = new URLSearchParams({
+      ticker: symbol,
+      symbol,
+    });
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    const requestUrl = `${baseUrl}${separator}${searchParams.toString()}`;
+
+    try {
+      const response = await fetch(requestUrl);
+      if (!response.ok) {
+        this.logger.error(
+          `Failed to fetch stock overview dataset (status=${response.status})`,
+        );
+        return null;
+      }
+
+      const payload =
+        (await response.json()) as GoogleStockOverviewResponse | null;
+
+      if (!payload || payload.error || !payload.data) {
+        this.logger.warn(
+          `Stock overview dataset returned no data for ${symbol}`,
+        );
+        return null;
+      }
+
+      return payload.data;
+    } catch (error) {
+      this.logger.error('Error fetching stock overview dataset', error);
       return null;
     }
   }
@@ -1103,6 +1149,14 @@ export class TechnicalIndicatorsService {
     }
   }
 
+  private formatDatePath(timestampMs: number): string {
+    const date = new Date(timestampMs);
+    const year = date.getUTCFullYear();
+    const month = `${date.getUTCMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getUTCDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   private getPerformanceWindowStart(): number {
     // Fetch a little over one full year to support all timeframes reliably.
     return Math.floor(Date.now() / 1000) - 400 * 86400;
@@ -1200,109 +1254,84 @@ export class TechnicalIndicatorsService {
     });
   }
 
-  async getStockOverview(
-    symbol: string,
-    options?: {
-      includeRsi?: boolean;
-      supportResolution?: PriceResolution;
-    },
-  ): Promise<StockOverviewResponse> {
+  async getStockOverview(symbol: string): Promise<StockOverviewResponse> {
     const upper = symbol.toUpperCase();
-    const includeRsi = options?.includeRsi ?? false;
-    const supportResolution = options?.supportResolution ?? 'day';
-
-    const basicsPromise = this.stockMetadataService
+    const basics = await this.stockMetadataService
       .getCompanyBasics(upper)
       .catch(() => null);
 
-    const quotePromise = this.quotesService
-      .getNormalizedQuote(upper)
-      .catch((error) => {
-        this.logger.debug(
-          `Quote lookup failed for ${upper}: ${
-            error instanceof Error ? error.message : error
-          }`,
-        );
-        return null;
-      });
+    const datasetRow = await this.fetchGoogleStockOverviewRow(upper).catch(
+      () => null,
+    );
 
-    const [basics, quote] = await Promise.all([basicsPromise, quotePromise]);
-
-    const priceValue =
-      quote && typeof quote.price === 'number' ? quote.price : null;
-    const priceSnapshot = quote
-      ? {
-          price: this.roundTo(priceValue, 2),
-          change:
-            typeof quote.change === 'number'
-              ? this.roundTo(quote.change, 2)
-              : null,
-          changePercent:
-            typeof quote.changePercent === 'number'
-              ? this.roundTo(quote.changePercent, 2)
-              : null,
-          marketCap:
-            typeof quote.marketCap === 'string' ? quote.marketCap : null,
-          volume: typeof quote.volume === 'string' ? quote.volume : null,
-          provider: null,
-          timestamp: new Date(),
-        }
-      : null;
-
-    let support: SupportLevelsSnapshot | null = null;
-    let supportMessage: string | undefined;
-    let supportProvider: 'polygon' | 'alphaVantage' | null = null;
-    if (priceSnapshot && priceSnapshot.price !== null) {
-      const supportResult = await this.computeSupportSnapshot(
-        upper,
-        supportResolution,
-        priceSnapshot.price,
-      );
-      support = supportResult.snapshot;
-      supportProvider = supportResult.provider;
-      supportMessage = supportResult.message;
-      if (!support && !supportMessage) {
-        supportMessage = 'Support levels unavailable for requested resolution';
-      }
-    } else {
-      supportMessage =
-        'Support levels unavailable without a valid price snapshot';
-    }
-
-    let rsi: RSISignal | null = null;
-    if (includeRsi) {
-      try {
-        rsi = await this.getRSI(upper, { fallback: true });
-      } catch (error) {
-        this.logger.debug(
-          `RSI lookup failed for ${upper}: ${
-            error instanceof Error ? error.message : error
-          }`,
-        );
-      }
-    }
-
-    const companyName =
-      basics?.name ?? (typeof quote?.name === 'string' ? quote.name : null);
-    const country =
-      basics?.country ??
-      (typeof quote?.country === 'string' ? quote.country : null);
-
-    return {
+    const baseResponse: StockOverviewResponse = {
       symbol: upper,
-      companyName: companyName ?? null,
-      country: country ?? null,
-      price: priceSnapshot,
-      rsi: includeRsi ? rsi : null,
-      support,
+      companyName: basics?.name ?? null,
+      supportLevel: null,
+      supportLevelSecondary: null,
+      resistance1: null,
+      resistance2: null,
+      rsi: null,
+      ema50: null,
+      ema200: null,
+      price: null,
+      changePrice: null,
+      changePercent: null,
+      group: null,
       metadata: {
-        supportResolution,
-        supportProvider,
-        includeRsi,
+        provider: this.stockOverviewSourceUrl ? 'google-script' : null,
+        sourceUrl: this.stockOverviewSourceUrl || null,
         timestamp: new Date(),
-        message: supportMessage,
+        message: undefined,
       },
     };
+
+    if (!datasetRow) {
+      baseResponse.metadata.message =
+        'Stock overview dataset returned no data for requested symbol';
+      return baseResponse;
+    }
+
+    const ensureNumber = (value?: number | string): number | null => {
+      const parsed = this.normalizeNumeric(value);
+      return parsed !== null ? this.roundTo(parsed, 2) : null;
+    };
+
+    const price = ensureNumber(datasetRow.Price);
+    const changePercent = ensureNumber(datasetRow['Change %']);
+    const changePrice =
+      price !== null && changePercent !== null
+        ? this.roundTo((price * changePercent) / 100, 2)
+        : null;
+
+    const response: StockOverviewResponse = {
+      symbol: upper,
+      companyName:
+        this.asString(datasetRow['Company name'])?.trim() ??
+        baseResponse.companyName,
+      supportLevel: ensureNumber(datasetRow['Support 1']),
+      supportLevelSecondary: ensureNumber(datasetRow['Support 2']),
+      resistance1: ensureNumber(datasetRow['Resistance 1']),
+      resistance2: ensureNumber(datasetRow['Resistance 2']),
+      rsi: ensureNumber(datasetRow.RSI),
+      ema50: ensureNumber(datasetRow['EMA 50']),
+      ema200: ensureNumber(datasetRow['EMA 200']),
+      price,
+      changePrice,
+      changePercent,
+      group: this.asString(datasetRow.Group)?.trim() ?? null,
+      metadata: {
+        provider: 'google-script',
+        sourceUrl: this.stockOverviewSourceUrl || null,
+        timestamp: new Date(),
+        message:
+          datasetRow.Ticker && datasetRow.Ticker.toUpperCase() !== upper
+            ? `Dataset returned ${datasetRow.Ticker} instead of ${upper}`
+            : undefined,
+      },
+    };
+
+    return response;
   }
 
   async getStockPriceHistory(
@@ -1357,6 +1386,111 @@ export class TechnicalIndicatorsService {
     }
 
     return response;
+  }
+
+  async getPolygonPriceHistoryBars(
+    symbol: string,
+    options?: {
+      startDate?: string;
+      endDate?: string;
+      range?: StockPriceHistoryRange;
+      multiplier?: number;
+      timespan?: PolygonTimespan;
+      limit?: number;
+      adjusted?: boolean;
+      sort?: 'asc' | 'desc';
+    },
+  ): Promise<PolygonAggregateBar[]> {
+    if (!this.polygonApiKey) {
+      this.logger.warn(
+        'POLYGON_API_KEY not configured; cannot fetch price history bars',
+      );
+      return [];
+    }
+
+    const upper = symbol.toUpperCase();
+    const multiplier = options?.multiplier ?? 1;
+    const allowedTimespans: PolygonTimespan[] = [
+      'minute',
+      'hour',
+      'day',
+      'week',
+      'month',
+    ];
+    const timespan: PolygonTimespan =
+      options?.timespan && allowedTimespans.includes(options.timespan)
+        ? options.timespan
+        : 'day';
+    const limitCandidate =
+      typeof options?.limit === 'number' && Number.isFinite(options.limit)
+        ? Math.floor(options.limit)
+        : 50_000;
+    const limit = Math.max(1, Math.min(limitCandidate, 50_000));
+    const adjusted = options?.adjusted ?? true;
+    const sort = options?.sort ?? 'asc';
+    const apiKey = this.polygonApiKey;
+
+    const normalizeDate = (value?: string): string | null => {
+      if (!value?.trim()) {
+        return null;
+      }
+      const parsed = Date.parse(`${value.trim()}T00:00:00Z`);
+      if (!Number.isFinite(parsed)) {
+        return null;
+      }
+      return this.formatDatePath(parsed);
+    };
+
+    let startPath = normalizeDate(options?.startDate);
+    let endPath = normalizeDate(options?.endDate);
+
+    if (!startPath || !endPath) {
+      const { from } = this.resolveHistoryRange(options?.range ?? '6M');
+      const toSeconds = Math.floor(Date.now() / 1000);
+      startPath = this.formatDatePath(from * 1000);
+      endPath = this.formatDatePath(toSeconds * 1000);
+    }
+
+    if (startPath > endPath) {
+      const temp = startPath;
+      startPath = endPath;
+      endPath = temp;
+    }
+
+    const query = new URLSearchParams({
+      adjusted: String(adjusted),
+      sort,
+      limit: limit.toString(),
+      apiKey,
+    });
+
+    const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(upper)}/range/${multiplier}/${timespan}/${startPath}/${endPath}?${query.toString()}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        this.logger.warn(
+          `Polygon price history request failed for ${upper}: ${response.status} ${response.statusText}`,
+        );
+        return [];
+      }
+
+      const payload = (await response.json()) as {
+        results?: PolygonAggregateBar[];
+      };
+
+      if (!Array.isArray(payload.results) || !payload.results.length) {
+        return [];
+      }
+
+      return payload.results;
+    } catch (error) {
+      this.logger.error(
+        `Error fetching Polygon price history for ${upper}:`,
+        error,
+      );
+      return [];
+    }
   }
 
   async getStockPerformance(symbol: string): Promise<StockPerformanceResponse> {
