@@ -524,7 +524,7 @@ export class TechnicalIndicatorsController {
   @ApiOperation({
     summary: 'Get latest company news',
     description:
-      'Returns relevant news articles for the symbol for dashboard feeds.',
+      'Returns curated news articles for the symbol sourced from the Google Apps Script dataset.',
   })
   @ApiParam({
     name: 'symbol',
@@ -625,24 +625,26 @@ export class TechnicalIndicatorsController {
 
   @Get('market-movers/all-us-stocks')
   @ApiOperation({
-    summary: 'Get ALL US stock market movers using Alpha Vantage',
+    summary: 'Get ALL US stock market movers via Google Apps Script feed',
     description:
-      'Returns top gainers and losers from the entire US stock market using Alpha Vantage pre-calculated market movers.',
+      'Returns top gainers and losers from the curated Google Apps Script dataset (≈440 US stocks) without hitting third-party rate limits.',
   })
   @ApiResponse({
     status: 200,
-    description: 'Alpha Vantage market movers retrieved successfully',
+    description: 'ALL US stock market movers retrieved successfully',
   })
   @ApiResponse({
     status: 500,
     description: 'Failed to retrieve ALL US stock market movers',
   })
   async getAllUSStockMarketMovers() {
-    this.logger.debug('Getting ALL US stock market movers from Alpha Vantage');
+    this.logger.debug(
+      'Getting ALL US stock market movers from Google Apps Script dataset',
+    );
 
     try {
       const result =
-        await this.technicalIndicatorsService.getAlphaVantageMarketMovers();
+        await this.technicalIndicatorsService.getGoogleScriptMarketMovers();
 
       if (!result) {
         return handleError({
@@ -654,7 +656,7 @@ export class TechnicalIndicatorsController {
 
       return handleSuccessOne({
         data: result,
-        message: 'Alpha Vantage market movers retrieved successfully',
+        message: 'ALL US stock market movers retrieved successfully',
       });
     } catch (error) {
       return handleError({

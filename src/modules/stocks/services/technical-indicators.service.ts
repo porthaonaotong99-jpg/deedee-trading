@@ -47,18 +47,6 @@ interface AlphaVantageDailySeries {
   };
 }
 
-interface PolygonNewsPayload {
-  results?: Array<{
-    title?: string;
-    description?: string;
-    article_url?: string;
-    image_url?: string;
-    published_utc?: string;
-    publisher?: { name?: string };
-  }>;
-  status?: string;
-}
-
 interface GoogleSupportBreakRow {
   Ticker?: string;
   Price?: number | string;
@@ -95,6 +83,26 @@ interface GoogleUsMarketRsiRow {
 interface GoogleUsMarketRsiResponse {
   error?: boolean;
   data?: GoogleUsMarketRsiRow[];
+  count?: number;
+}
+
+interface GoogleStockNewsRow {
+  title?: string;
+  title_th?: string;
+  description?: string;
+  description_th?: string;
+  url?: string;
+  publishedAt?: string;
+  source?: string;
+  ticker?: string;
+  image?: string;
+  sentiment?: string;
+  topics?: string[];
+}
+
+interface GoogleStockNewsResponse {
+  error?: boolean;
+  data?: GoogleStockNewsRow[];
   count?: number;
 }
 
@@ -171,6 +179,12 @@ export class TechnicalIndicatorsService {
   ]);
   private readonly symbolPattern = /^[A-Z0-9.-]+$/;
   private readonly supportBreakSourceUrl = process.env.SUPPORT_BREAK_SOURCE_URL;
+  private readonly allUsMarketMoversSourceUrl =
+    process.env.ALL_US_MARKET_MOVERS_SOURCE_URL ?? '';
+  private readonly stockNewsSourceUrl =
+    process.env.STOCK_NEWS_SOURCE_URL ??
+    process.env.GOOGLE_STOCK_NEWS_SOURCE_URL ??
+    '';
   private readonly usMarketRsiSourceUrl =
     process.env.US_MARKET_RSI_SOURCE_URL ??
     process.env.ALL_US_RSI_SOURCE_URL ??
@@ -248,39 +262,93 @@ export class TechnicalIndicatorsService {
     return null;
   }
 
-  private async fetchExternalSupportBreakRows(): Promise<
-    GoogleSupportBreakRow[] | null
-  > {
-    if (!this.supportBreakSourceUrl) {
-      this.logger.error('Support-break dataset URL not configured');
+  private async fetchGoogleSupportDatasetRows(
+    url: string | null | undefined,
+    datasetLabel: string,
+  ): Promise<GoogleSupportBreakRow[] | null> {
+    const normalizedUrl = url?.trim();
+    if (!normalizedUrl) {
+      this.logger.error(`${datasetLabel} dataset URL not configured`);
       return null;
     }
 
     try {
-      const response = await fetch(this.supportBreakSourceUrl);
+      const response = await fetch(normalizedUrl);
       if (!response.ok) {
         this.logger.error(
-          `Failed to fetch external support-break dataset (status=${response.status})`,
+          `Failed to fetch ${datasetLabel} dataset (status=${response.status})`,
         );
         return null;
       }
 
       const payload = (await response.json()) as GoogleSupportBreakResponse;
       if (payload.error) {
-        this.logger.error(
-          'External support-break dataset reported an error flag',
-        );
+        this.logger.error(`${datasetLabel} dataset reported an error flag`);
         return null;
       }
 
       if (!Array.isArray(payload.data) || !payload.data.length) {
-        this.logger.warn('External support-break dataset returned no rows');
+        this.logger.warn(`${datasetLabel} dataset returned no rows`);
         return null;
       }
 
       return payload.data;
     } catch (error) {
-      this.logger.error('Error fetching external support-break dataset', error);
+      this.logger.error(`Error fetching ${datasetLabel} dataset`, error);
+      return null;
+    }
+  }
+
+  private async fetchExternalSupportBreakRows(): Promise<
+    GoogleSupportBreakRow[] | null
+  > {
+    return this.fetchGoogleSupportDatasetRows(
+      this.supportBreakSourceUrl,
+      'external support-break',
+    );
+  }
+
+  private async fetchExternalAllUsMarketMoverRows(): Promise<
+    GoogleSupportBreakRow[] | null
+  > {
+    return this.fetchGoogleSupportDatasetRows(
+      this.allUsMarketMoversSourceUrl,
+      'ALL US market movers',
+    );
+  }
+
+  private async fetchGoogleStockNewsRows(): Promise<
+    GoogleStockNewsRow[] | null
+  > {
+    const url = this.stockNewsSourceUrl?.trim();
+    if (!url) {
+      this.logger.error('Stock news dataset URL not configured');
+      return null;
+    }
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        this.logger.error(
+          `Failed to fetch stock news dataset (status=${response.status})`,
+        );
+        return null;
+      }
+
+      const payload = (await response.json()) as GoogleStockNewsResponse;
+      if (payload.error) {
+        this.logger.error('Stock news dataset reported an error flag');
+        return null;
+      }
+
+      if (!Array.isArray(payload.data) || !payload.data.length) {
+        this.logger.warn('Stock news dataset returned no rows');
+        return null;
+      }
+
+      return payload.data;
+    } catch (error) {
+      this.logger.error('Error fetching stock news dataset', error);
       return null;
     }
   }
@@ -393,6 +461,39 @@ export class TechnicalIndicatorsService {
       ema50,
       ema200,
       group,
+    };
+  }
+
+  private mapGoogleMarketMoverRow(
+    row: GoogleSupportBreakRow,
+  ): MarketMoverStock | null {
+    const symbol = this.asString(row.Ticker)?.trim().toUpperCase();
+    if (!symbol || !this.symbolPattern.test(symbol)) {
+      return null;
+    }
+
+    const price = this.normalizeNumeric(row.Price);
+    const changePercentValue = this.normalizeNumeric(row['Change %']);
+    if (price === null || changePercentValue === null) {
+      return null;
+    }
+
+    const lastPrice = this.roundTo(price);
+    const changePercent = this.roundTo(changePercentValue);
+    if (lastPrice === null || changePercent === null) {
+      return null;
+    }
+
+    const change = this.roundTo(lastPrice * (changePercent / 100)) ?? 0;
+
+    return {
+      symbol,
+      lastPrice,
+      changePercent,
+      change,
+      high: null,
+      low: null,
+      volume: null,
     };
   }
 
@@ -1391,19 +1492,21 @@ export class TechnicalIndicatorsService {
 
   async getStockNews(symbol: string, limit = 6): Promise<StockNewsResponse> {
     const upper = symbol.toUpperCase();
-    const hasFmpKey = !!process.env.FMP_API_KEY;
-    const hasPolygonKey = !!this.polygonApiKey;
+    const normalizedLimit =
+      Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 50) : 6;
+
     const metadata = {
-      provider: hasFmpKey ? ('fmp' as const) : ('polygon' as const),
-      limit,
-      hasApiKey: hasFmpKey || hasPolygonKey,
+      provider: 'google-script' as const,
+      limit: normalizedLimit,
+      hasApiKey: Boolean(this.stockNewsSourceUrl),
       fetchedAt: new Date(),
       message: undefined as string | undefined,
     };
 
-    if (!hasFmpKey && !hasPolygonKey) {
+    const rows = await this.fetchGoogleStockNewsRows();
+    if (!rows) {
       metadata.message =
-        'No news providers configured; set FMP_API_KEY or POLYGON_API_KEY';
+        'Stock news dataset unavailable; configure STOCK_NEWS_SOURCE_URL';
       return {
         symbol: upper,
         items: [],
@@ -1411,86 +1514,54 @@ export class TechnicalIndicatorsService {
       };
     }
 
-    if (hasFmpKey) {
-      const url = `https://financialmodelingprep.com/api/v3/stock_news?tickers=${encodeURIComponent(upper)}&limit=${limit}&apikey=${process.env.FMP_API_KEY}`;
-      try {
-        const response = await fetch(url);
-        if (response.ok) {
-          const payload = (await response.json()) as Array<
-            Record<string, unknown>
-          >;
-          if (Array.isArray(payload)) {
-            const items = payload.map((item) => {
-              const published = this.asString(item['publishedDate']) ?? null;
-              const headline =
-                this.asString(item['title']) ?? 'Unknown headline';
-              const source = this.asString(item['site']) ?? null;
-              const urlValue = this.asString(item['url']) ?? null;
-              const summary = this.asString(item['text']) ?? null;
-              const imageUrl = this.asString(item['image']) ?? null;
-              return {
-                headline,
-                source,
-                url: urlValue,
-                summary,
-                publishedAt: published,
-                imageUrl,
-              };
-            });
+    const filtered = rows.filter((row) => {
+      const ticker = this.asString(row.ticker)?.trim().toUpperCase();
+      return ticker === upper;
+    });
 
-            return {
-              symbol: upper,
-              items,
-              metadata,
-            };
-          }
-        } else {
-          metadata.message = `FMP news request failed with status ${response.status}`;
-        }
-      } catch (error) {
-        metadata.message = `Error fetching FMP news: ${
-          error instanceof Error ? error.message : error
-        }`;
-      }
+    if (!filtered.length) {
+      metadata.message = `No news entries found for ${upper} in Google dataset`;
+      return {
+        symbol: upper,
+        items: [],
+        metadata,
+      };
     }
 
-    if (hasPolygonKey) {
-      const url = `https://api.polygon.io/v2/reference/news?ticker=${encodeURIComponent(upper)}&order=desc&limit=${limit}&apiKey=${this.polygonApiKey}`;
-      try {
-        const response = await fetch(url);
-        if (response.ok) {
-          const payload = (await response.json()) as PolygonNewsPayload;
-          const items = (payload.results ?? []).slice(0, limit).map((item) => ({
-            headline: item.title ?? 'Unknown headline',
-            source: item.publisher?.name ?? null,
-            url: item.article_url ?? null,
-            summary: item.description ?? null,
-            publishedAt: item.published_utc ?? null,
-            imageUrl: item.image_url ?? null,
-          }));
-
-          metadata.provider = 'polygon';
-          if (!items.length) {
-            metadata.message = 'Polygon returned no news results';
-          }
-
-          return {
-            symbol: upper,
-            items,
-            metadata,
-          };
-        }
-        metadata.message = `Polygon news request failed with status ${response.status}`;
-      } catch (error) {
-        metadata.message = `Error fetching Polygon news: ${
-          error instanceof Error ? error.message : error
-        }`;
+    const toTimestamp = (value?: string): number => {
+      if (!value) {
+        return 0;
       }
+      const time = new Date(value).getTime();
+      return Number.isNaN(time) ? 0 : time;
+    };
+
+    const items = filtered
+      .sort((a, b) => toTimestamp(b.publishedAt) - toTimestamp(a.publishedAt))
+      .slice(0, normalizedLimit)
+      .map((row) => ({
+        title: this.asString(row.title) ?? 'Unknown headline',
+        title_th: this.asString(row.title_th) ?? 'Unknown headline',
+        description: this.asString(row.description) ?? null,
+        description_th: this.asString(row.description_th) ?? null,
+        source: this.asString(row.source) ?? null,
+        url: this.asString(row.url) ?? null,
+        publishedAt: this.asString(row.publishedAt) ?? null,
+        imageUrl: this.asString(row.image) ?? null,
+        topicTags: this.asString(row.topics)
+          ? this.asString(row.topics)!
+              .split(',')
+              .map((t) => t.trim())
+          : [],
+      }));
+
+    if (!items.length) {
+      metadata.message = 'No valid news entries after processing dataset rows';
     }
 
     return {
       symbol: upper,
-      items: [],
+      items,
       metadata,
     };
   }
@@ -1748,6 +1819,53 @@ export class TechnicalIndicatorsService {
       topGainers,
       topLosers,
       timestamp,
+    };
+  }
+
+  async getGoogleScriptMarketMovers(
+    limitPerCategory = 10,
+  ): Promise<MarketMoversResponse | null> {
+    const rows = await this.fetchExternalAllUsMarketMoverRows();
+    if (!rows) {
+      return null;
+    }
+
+    const mapped = rows
+      .map((row) => this.mapGoogleMarketMoverRow(row))
+      .filter((row): row is MarketMoverStock => row !== null);
+
+    if (!mapped.length) {
+      this.logger.warn(
+        'ALL US market movers dataset did not contain any valid rows',
+      );
+      return null;
+    }
+
+    const limit = Math.max(1, limitPerCategory);
+    const topGainers = mapped
+      .filter((stock) => stock.changePercent > 0)
+      .sort((stockA, stockB) => stockB.changePercent - stockA.changePercent)
+      .slice(0, limit);
+    const topLosers = mapped
+      .filter((stock) => stock.changePercent < 0)
+      .sort((stockA, stockB) => stockA.changePercent - stockB.changePercent)
+      .slice(0, limit);
+
+    if (!topGainers.length && !topLosers.length) {
+      this.logger.warn(
+        'ALL US market movers dataset produced no qualifying gainers or losers',
+      );
+      return null;
+    }
+
+    this.logger.debug(
+      `Google Apps Script market movers processed (gainers=${topGainers.length}, losers=${topLosers.length}, inspected=${mapped.length})`,
+    );
+
+    return {
+      topGainers,
+      topLosers,
+      timestamp: new Date(),
     };
   }
 

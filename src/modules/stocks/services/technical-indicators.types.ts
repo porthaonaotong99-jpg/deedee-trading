@@ -246,7 +246,10 @@ export interface StockRevenueResponse {
 }
 
 export interface StockNewsItem {
-  headline: string;
+  title: string;
+  title_th?: string | null;
+  description?: string | null;
+  description_th?: string | null;
   source?: string | null;
   url?: string | null;
   summary?: string | null;
@@ -258,7 +261,7 @@ export interface StockNewsResponse {
   symbol: string;
   items: StockNewsItem[];
   metadata: {
-    provider: 'fmp' | 'polygon';
+    provider: 'fmp' | 'polygon' | 'google-script';
     limit: number;
     hasApiKey: boolean;
     fetchedAt: Date;
