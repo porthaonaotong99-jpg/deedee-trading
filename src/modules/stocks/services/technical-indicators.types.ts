@@ -65,19 +65,33 @@ export type AlphaVantageMoverCategory =
   | 'top_losers'
   | 'most_actively_traded';
 
-export interface USMarketRsiMetadata {
-  limitPerCategory: number;
-  totalRequested: number;
-  providerPreference: 'polygon' | 'alphaVantage' | 'auto';
-  categories: Record<AlphaVantageMoverCategory, string[]>;
-  skippedTickers: Record<AlphaVantageMoverCategory, string[]>;
+export interface USMarketRsiBucketStock {
+  symbol: string;
+  companyName?: string | null;
+  lastPrice?: number | null;
+  changePercent?: number | null;
+  change?: number | null;
+  rsi: number;
+  status: 'oversold' | 'overbought';
+  group?: string | null;
+  lastUpdated?: Date | null;
 }
 
-export interface USMarketRsiResponse {
+export interface USMarketRsiBucketMetadata {
+  limitPerBucket: number;
+  inspected: number;
+  produced: number;
+  oversoldCount: number;
+  overboughtCount: number;
+  source: 'google-script';
+  sourceUrl?: string | null;
+}
+
+export interface USMarketRsiBucketResponse {
   timestamp: Date;
-  symbols: RSISignal[];
-  failedSymbols: string[];
-  metadata: USMarketRsiMetadata;
+  oversold: USMarketRsiBucketStock[];
+  overbought: USMarketRsiBucketStock[];
+  metadata: USMarketRsiBucketMetadata;
 }
 
 export interface SupportBreakLoser {

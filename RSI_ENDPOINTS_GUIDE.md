@@ -47,29 +47,21 @@ GET /technical-indicators/rsi/all
 
 ### 2️⃣ **Comprehensive: RSI for ALL US Stocks**
 ```
-GET /technical-indicators/rsi/all-us-stocks?limit=100&batchSize=10
+GET /technical-indicators/rsi/all-us-stocks?limit=25
 ```
 
-**Speed**: 🐢 Slow (1-5 minutes depending on limit)  
-**Coverage**: ALL US common stocks (you control the limit)  
-**Best For**: Comprehensive analysis, scanning entire market
+**Speed**: ⚡ Instant (depends on Google Apps Script response time)  
+**Coverage**: Oversold (RSI ≤ 30) and overbought (RSI ≥ 70) US stocks sourced from a curated Google Sheet  
+**Best For**: Quick view of market extremes without hammering provider APIs
 
 **Query Parameters**:
-- `limit` (optional, default: 100): Maximum number of stocks to analyze
-- `batchSize` (optional, default: 10): Parallel processing batch size
+- `limit` (optional, default: 25): Maximum symbols to return per RSI bucket (oversold & overbought)
 
-**⚠️ WARNING**: 
-- This endpoint is **SLOW** because it must fetch RSI for each stock individually
-- Finnhub free tier allows ~60 API calls per minute
-- For 100 stocks, expect ~2-3 minutes
+**Behind the scenes**: The backend now consumes a Google Apps Script JSON feed (configurable via `US_MARKET_RSI_SOURCE_URL`). The feed is refreshed externally, so your API stays fast and predictable.
 
 **Example Request**:
 ```bash
-# Analyze 200 stocks (will take ~5 minutes)
-curl "http://localhost:3000/technical-indicators/rsi/all-us-stocks?limit=200&batchSize=10"
-
-# Quick scan of 50 stocks (~1 minute)
-curl "http://localhost:3000/technical-indicators/rsi/all-us-stocks?limit=50&batchSize=10"
+curl "http://localhost:3000/technical-indicators/rsi/all-us-stocks?limit=40"
 ```
 
 **Response**:
@@ -77,16 +69,38 @@ curl "http://localhost:3000/technical-indicators/rsi/all-us-stocks?limit=50&batc
 {
   "is_error": false,
   "code": "SUCCESS",
-  "message": "RSI data retrieved for 95 stocks",
-  "data": [
-    {
-      "symbol": "AAPL",
-      "rsi": 67.45,
-      "status": "neutral",
-      "timestamp": "2025-10-26T10:30:00.000Z"
-    },
-    // ... 94 more stocks
-  ],
+  "message": "US market RSI extremes retrieved successfully",
+  "data": {
+    "timestamp": "2025-10-26T10:30:00.000Z",
+    "oversold": [
+      {
+        "symbol": "TSLA",
+        "companyName": "Tesla Inc",
+        "lastPrice": 198.25,
+        "changePercent": -2.18,
+        "rsi": 28.12,
+        "status": "oversold",
+        "group": "EV"
+      }
+    ],
+    "overbought": [
+      {
+        "symbol": "META",
+        "companyName": "Meta Platforms",
+        "lastPrice": 347.9,
+        "changePercent": 1.87,
+        "rsi": 74.5,
+        "status": "overbought",
+        "group": "Tech Megacap"
+      }
+    ],
+    "metadata": {
+      "limitPerBucket": 40,
+      "oversoldCount": 55,
+      "overboughtCount": 22,
+      "source": "google-script"
+    }
+  },
   "error": null,
   "status_code": 200
 }

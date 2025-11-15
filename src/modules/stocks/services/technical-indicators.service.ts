@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   AlphaVantageMarketMoversResponse,
   AlphaVantageStock,
-  AlphaVantageMoverCategory,
   MarketMoverStock,
   MarketMoversResponse,
   PolygonRsiResponse,
@@ -19,7 +18,8 @@ import {
   SupportBreakLoser,
   SupportBreakLosersResponse,
   SupportLevelsSnapshot,
-  USMarketRsiResponse,
+  USMarketRsiBucketResponse,
+  USMarketRsiBucketStock,
 } from './technical-indicators.types';
 import { StockMetadataService } from './stock-metadata.service';
 import { QuotesService } from './quotes.service';
@@ -77,6 +77,24 @@ interface GoogleSupportBreakRow {
 interface GoogleSupportBreakResponse {
   error?: boolean;
   data?: GoogleSupportBreakRow[];
+  count?: number;
+}
+
+interface GoogleUsMarketRsiRow {
+  Ticker?: string;
+  RSI?: number | string;
+  Price?: number | string;
+  'Change %'?: number | string;
+  Change?: number | string;
+  Group?: string;
+  'Company name'?: string;
+  'Last Updated'?: string;
+  'Updated At'?: string;
+}
+
+interface GoogleUsMarketRsiResponse {
+  error?: boolean;
+  data?: GoogleUsMarketRsiRow[];
   count?: number;
 }
 
@@ -152,10 +170,11 @@ export class TechnicalIndicatorsService {
     'AMERICA',
   ]);
   private readonly symbolPattern = /^[A-Z0-9.-]+$/;
-  private readonly supportBreakSourceUrl =
-    process.env.SUPPORT_BREAK_SOURCE_URL ??
-    'https://script.googleusercontent.com/macros/echo?user_content_key=AehSKLjSfClJSlqMs-p5HOCSTiXgsjr4TVtWNyV3FJPoWrayQfA6Up70F9XMjsSOOpIT2bdzVgJlpJ7tSvreyB1o3KvXZRpg-lqQVMrtIoSqcyugn1X_p2S5kgQVe_uJJAtLrw7LVWr3XRqYY0wl_1K74haGgOY1VaD5q5_lHRWFhMBOwH62YARpqTxmXWPHCFD8gOKiJ2VGOJWtQ6hOatK_7tadNGBW6qgf3cxhONJAlndAHUJ_mhES1y4CnpYk77vFXXx9BxaCuSIb8cJ0YH2gOO1g9oVhjPZpdMQohOc1PeFlBux-6touPdzndBigTRHjcTXFZFK7&lib=M9iIL-d3cit8nyj6jTjv6aaTohXJVNEWP';
-
+  private readonly supportBreakSourceUrl = process.env.SUPPORT_BREAK_SOURCE_URL;
+  private readonly usMarketRsiSourceUrl =
+    process.env.US_MARKET_RSI_SOURCE_URL ??
+    process.env.ALL_US_RSI_SOURCE_URL ??
+    '';
   constructor(
     private readonly stockMetadataService: StockMetadataService,
     private readonly quotesService: QuotesService,
@@ -266,6 +285,43 @@ export class TechnicalIndicatorsService {
     }
   }
 
+  private async fetchExternalUsMarketRsiRows(): Promise<
+    GoogleUsMarketRsiRow[] | null
+  > {
+    if (!this.usMarketRsiSourceUrl) {
+      this.logger.error('US market RSI dataset URL not configured');
+      return null;
+    }
+
+    try {
+      const response = await fetch(this.usMarketRsiSourceUrl);
+      if (!response.ok) {
+        this.logger.error(
+          `Failed to fetch US market RSI dataset (status=${response.status})`,
+        );
+        return null;
+      }
+
+      const payload =
+        (await response.json()) as GoogleUsMarketRsiResponse | null;
+
+      if (!payload || payload.error) {
+        this.logger.error('US market RSI dataset reported an error');
+        return null;
+      }
+
+      if (!Array.isArray(payload.data) || !payload.data.length) {
+        this.logger.warn('US market RSI dataset returned no rows');
+        return null;
+      }
+
+      return payload.data;
+    } catch (error) {
+      this.logger.error('Error fetching US market RSI dataset', error);
+      return null;
+    }
+  }
+
   private mapGoogleSupportBreakRow(
     row: GoogleSupportBreakRow,
   ): SupportBreakLoser | null {
@@ -337,6 +393,50 @@ export class TechnicalIndicatorsService {
       ema50,
       ema200,
       group,
+    };
+  }
+
+  private mapGoogleUsMarketRsiRow(
+    row: GoogleUsMarketRsiRow,
+  ): USMarketRsiBucketStock | null {
+    const symbol = this.asString(row.Ticker)?.trim().toUpperCase();
+    if (!symbol || !this.symbolPattern.test(symbol)) {
+      return null;
+    }
+
+    const rsi = this.roundTo(this.normalizeNumeric(row.RSI));
+    if (rsi === null) {
+      return null;
+    }
+
+    const status = this.classifyRsi(rsi);
+    if (status === 'neutral') {
+      return null;
+    }
+
+    const lastPrice = this.roundTo(this.normalizeNumeric(row.Price));
+    const changePercent = this.roundTo(this.normalizeNumeric(row['Change %']));
+    const change =
+      changePercent !== null && lastPrice !== null
+        ? this.roundTo(lastPrice * (changePercent / 100))
+        : this.roundTo(this.normalizeNumeric(row.Change));
+    const group = this.asString(row.Group)?.trim() ?? null;
+    const companyName = this.asString(row['Company name'])?.trim() ?? null;
+    const lastUpdatedRaw =
+      this.asString(row['Last Updated']) ?? this.asString(row['Updated At']);
+    const lastUpdated = lastUpdatedRaw ? new Date(lastUpdatedRaw) : null;
+
+    return {
+      symbol,
+      rsi,
+      status,
+      lastPrice,
+      changePercent,
+      change,
+      group,
+      companyName,
+      lastUpdated:
+        lastUpdated && Number.isNaN(lastUpdated.getTime()) ? null : lastUpdated,
     };
   }
 
@@ -1705,107 +1805,66 @@ export class TechnicalIndicatorsService {
   }
 
   async getUSMarketRsi({
-    limitPerCategory = 25,
-    provider,
-    interval = 'daily',
-    timeperiod = 14,
-    timespan = 'day',
-    window,
-    fallback = true,
+    limitPerBucket = 25,
   }: {
-    limitPerCategory?: number;
-    provider?: 'polygon' | 'alphaVantage';
-    interval?: AlphaInterval;
-    timeperiod?: number;
-    timespan?: PolygonTimespan;
-    window?: number;
-    fallback?: boolean;
-  } = {}): Promise<USMarketRsiResponse | null> {
-    const payload = await this.fetchAlphaVantageMarketMovers();
-    if (!payload) {
+    limitPerBucket?: number;
+  } = {}): Promise<USMarketRsiBucketResponse | null> {
+    const rows = await this.fetchExternalUsMarketRsiRows();
+    if (!rows) {
       return null;
     }
 
-    const categories: AlphaVantageMoverCategory[] = [
-      'top_gainers',
-      'top_losers',
-      'most_actively_traded',
-    ];
+    const limit = Math.max(1, limitPerBucket);
+    const oversold: USMarketRsiBucketStock[] = [];
+    const overbought: USMarketRsiBucketStock[] = [];
+    let produced = 0;
+    let oversoldCount = 0;
+    let overboughtCount = 0;
 
-    const limit = Math.max(1, limitPerCategory);
+    for (const row of rows) {
+      const mapped = this.mapGoogleUsMarketRsiRow(row);
+      if (!mapped) {
+        continue;
+      }
 
-    const categorySymbols: Record<AlphaVantageMoverCategory, string[]> = {
-      top_gainers: [],
-      top_losers: [],
-      most_actively_traded: [],
-    };
-    const skippedByCategory: Record<AlphaVantageMoverCategory, string[]> = {
-      top_gainers: [],
-      top_losers: [],
-      most_actively_traded: [],
-    };
+      produced += 1;
 
-    for (const category of categories) {
-      const { items, skipped } = this.filterAlphaVantageStocks(
-        payload[category],
-        limit,
-        (_, symbol) => symbol,
-      );
-      categorySymbols[category] = items;
-      skippedByCategory[category] = skipped;
-    }
-
-    const skippedSummary = categories.flatMap(
-      (category) => skippedByCategory[category],
-    );
-    if (skippedSummary.length) {
-      this.logger.debug(
-        `Skipped ${skippedSummary.length} non-US or inactive tickers when building RSI universe: ${skippedSummary.join(', ')}`,
-      );
-    }
-
-    const uniqueSymbols = Array.from(
-      new Set(categories.flatMap((category) => categorySymbols[category])),
-    );
-
-    this.logger.log(
-      `Fetching RSI for ${uniqueSymbols.length} US tickers from Alpha Vantage movers universe (limit ${limit})`,
-    );
-
-    const signals: RSISignal[] = [];
-    const failedSymbols: string[] = [];
-
-    for (const ticker of uniqueSymbols) {
-      const signal = await this.getRSI(ticker, {
-        provider,
-        interval,
-        timeperiod,
-        timespan,
-        window,
-        fallback,
-      });
-
-      if (signal) {
-        signals.push(signal);
-      } else {
-        failedSymbols.push(ticker);
+      if (mapped.status === 'oversold') {
+        oversoldCount += 1;
+        if (oversold.length < limit) {
+          oversold.push(mapped);
+        }
+      } else if (mapped.status === 'overbought') {
+        overboughtCount += 1;
+        if (overbought.length < limit) {
+          overbought.push(mapped);
+        }
       }
     }
 
-    const timestamp = payload.last_updated
-      ? new Date(payload.last_updated)
-      : new Date();
+    if (!oversold.length && !overbought.length) {
+      this.logger.warn(
+        'External US market RSI dataset contained no oversold or overbought entries',
+      );
+      return null;
+    }
+
+    this.logger.debug(
+      `US market RSI dataset processed (oversold=${oversoldCount}, overbought=${overboughtCount}, limit=${limit})`,
+    );
 
     return {
-      timestamp,
-      symbols: signals,
-      failedSymbols,
+      timestamp: new Date(),
+      oversold,
+      overbought,
       metadata: {
-        limitPerCategory: limit,
-        totalRequested: uniqueSymbols.length,
-        providerPreference: provider ?? 'auto',
-        categories: categorySymbols,
-        skippedTickers: skippedByCategory,
+        limitPerBucket: limit,
+        inspected: rows.length,
+        produced,
+        oversoldCount,
+        overboughtCount,
+        source: 'google-script',
+        // sourceUrl: this.usMarketRsiSourceUrl || null,
       },
     };
   }

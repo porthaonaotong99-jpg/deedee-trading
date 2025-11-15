@@ -566,129 +566,57 @@ export class TechnicalIndicatorsController {
 
   @Get('rsi/all-us-stocks')
   @ApiOperation({
-    summary: 'Get RSI snapshot for US stock movers',
+    summary: 'Get RSI extremes for the entire US market',
     description:
-      'Aggregates RSI values for the Alpha Vantage US market movers universe (top gainers, losers, most active).',
+      'Fetches oversold (RSI ≤ 30) and overbought (RSI ≥ 70) groups from the curated Google Apps Script feed for instant dashboards.',
   })
   @ApiQuery({
     name: 'limit',
     required: false,
-    description: 'Maximum symbols to take from each Alpha Vantage category',
+    description:
+      'Maximum number of stocks to return per RSI bucket (oversold & overbought).',
     example: 25,
-  })
-  @ApiQuery({
-    name: 'provider',
-    required: false,
-    description: 'Force a specific provider for RSI calculations',
-    example: 'polygon',
-    enum: ['polygon', 'alphaVantage'],
-  })
-  @ApiQuery({
-    name: 'interval',
-    required: false,
-    description:
-      'Alpha Vantage interval (used when provider=alphaVantage or when Polygon falls back to Alpha Vantage)',
-    example: 'daily',
-    enum: [
-      '1min',
-      '5min',
-      '15min',
-      '30min',
-      '60min',
-      'daily',
-      'weekly',
-      'monthly',
-    ],
-  })
-  @ApiQuery({
-    name: 'timeperiod',
-    required: false,
-    description: 'RSI period/window',
-    example: 14,
-  })
-  @ApiQuery({
-    name: 'timespan',
-    required: false,
-    description: 'Polygon timespan (used when provider=polygon)',
-    example: 'day',
-    enum: ['minute', 'hour', 'day', 'week', 'month'],
-  })
-  @ApiQuery({
-    name: 'window',
-    required: false,
-    description: 'Polygon RSI window override',
-    example: 14,
-  })
-  @ApiQuery({
-    name: 'fallback',
-    required: false,
-    description:
-      'Allow fallback from Polygon to Alpha Vantage when Polygon fails',
-    example: true,
   })
   @ApiResponse({
     status: 200,
-    description: 'US market RSI snapshot retrieved successfully',
+    description: 'US market RSI extremes retrieved successfully',
   })
   @ApiResponse({
     status: 500,
-    description: 'Failed to retrieve US market RSI snapshot',
+    description: 'Failed to retrieve US market RSI extremes',
   })
-  async getAllUsStockRsi(
-    @Query('limit') limit = '25',
-    @Query('provider') provider?: 'polygon' | 'alphaVantage',
-    @Query('interval')
-    interval:
-      | '1min'
-      | '5min'
-      | '15min'
-      | '30min'
-      | '60min'
-      | 'daily'
-      | 'weekly'
-      | 'monthly' = 'daily',
-    @Query('timeperiod') timeperiod = '14',
-    @Query('timespan')
-    timespan: 'minute' | 'hour' | 'day' | 'week' | 'month' = 'day',
-    @Query('window') window?: string,
-    @Query('fallback') fallback = 'true',
-  ) {
-    const parsedLimit = Number(limit) > 0 ? Number(limit) : 25;
-    const parsedTimeperiod = Number(timeperiod ?? '14');
-    const parsedWindow = window !== undefined ? Number(window) : undefined;
-    const allowFallback = fallback !== 'false';
+  async getAllUsStockRsi(@Query('limit') limit = '25') {
+    const parsedLimitRaw = Number(limit);
+    const parsedLimit =
+      Number.isFinite(parsedLimitRaw) && parsedLimitRaw > 0
+        ? Math.floor(parsedLimitRaw)
+        : 25;
 
     this.logger.debug(
-      `Getting US market RSI snapshot (limit=${parsedLimit}, provider=${provider ?? 'auto'}, timespan=${timespan}, interval=${interval})`,
+      `Getting US market RSI extremes from Google dataset (limit=${parsedLimit})`,
     );
 
     try {
       const result = await this.technicalIndicatorsService.getUSMarketRsi({
-        limitPerCategory: parsedLimit,
-        provider,
-        interval,
-        timeperiod: parsedTimeperiod,
-        timespan,
-        window: parsedWindow,
-        fallback: allowFallback,
+        limitPerBucket: parsedLimit,
       });
 
       if (!result) {
         return handleError({
           code: 'RSI_UNIVERSE_ERROR',
-          message: 'Failed to build US market RSI snapshot',
+          message: 'Failed to build US market RSI extremes from the dataset',
           statusCode: 500,
         });
       }
 
       return handleSuccessOne({
         data: result,
-        message: 'US market RSI snapshot retrieved successfully',
+        message: 'US market RSI extremes retrieved successfully',
       });
     } catch (error) {
       return handleError({
         code: 'RSI_UNIVERSE_ERROR',
-        message: 'Failed to retrieve US market RSI snapshot',
+        message: 'Failed to retrieve US market RSI extremes',
         error,
         statusCode: 500,
       });
