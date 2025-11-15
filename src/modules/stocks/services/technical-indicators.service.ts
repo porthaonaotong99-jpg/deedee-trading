@@ -59,6 +59,27 @@ interface PolygonNewsPayload {
   status?: string;
 }
 
+interface GoogleSupportBreakRow {
+  Ticker?: string;
+  Price?: number | string;
+  'Change %'?: number | string;
+  'Support 1'?: number | string;
+  'Support 2'?: number | string;
+  'Resistance 1'?: number | string;
+  'Resistance 2'?: number | string;
+  RSI?: number | string;
+  'EMA 50'?: number | string;
+  'EMA 200'?: number | string;
+  'Company name'?: string;
+  Group?: string;
+}
+
+interface GoogleSupportBreakResponse {
+  error?: boolean;
+  data?: GoogleSupportBreakRow[];
+  count?: number;
+}
+
 type AlphaInterval =
   | '1min'
   | '5min'
@@ -131,6 +152,9 @@ export class TechnicalIndicatorsService {
     'AMERICA',
   ]);
   private readonly symbolPattern = /^[A-Z0-9.-]+$/;
+  private readonly supportBreakSourceUrl =
+    process.env.SUPPORT_BREAK_SOURCE_URL ??
+    'https://script.googleusercontent.com/macros/echo?user_content_key=AehSKLjSfClJSlqMs-p5HOCSTiXgsjr4TVtWNyV3FJPoWrayQfA6Up70F9XMjsSOOpIT2bdzVgJlpJ7tSvreyB1o3KvXZRpg-lqQVMrtIoSqcyugn1X_p2S5kgQVe_uJJAtLrw7LVWr3XRqYY0wl_1K74haGgOY1VaD5q5_lHRWFhMBOwH62YARpqTxmXWPHCFD8gOKiJ2VGOJWtQ6hOatK_7tadNGBW6qgf3cxhONJAlndAHUJ_mhES1y4CnpYk77vFXXx9BxaCuSIb8cJ0YH2gOO1g9oVhjPZpdMQohOc1PeFlBux-6touPdzndBigTRHjcTXFZFK7&lib=M9iIL-d3cit8nyj6jTjv6aaTohXJVNEWP';
 
   constructor(
     private readonly stockMetadataService: StockMetadataService,
@@ -203,6 +227,117 @@ export class TechnicalIndicatorsService {
       return false;
     }
     return null;
+  }
+
+  private async fetchExternalSupportBreakRows(): Promise<
+    GoogleSupportBreakRow[] | null
+  > {
+    if (!this.supportBreakSourceUrl) {
+      this.logger.error('Support-break dataset URL not configured');
+      return null;
+    }
+
+    try {
+      const response = await fetch(this.supportBreakSourceUrl);
+      if (!response.ok) {
+        this.logger.error(
+          `Failed to fetch external support-break dataset (status=${response.status})`,
+        );
+        return null;
+      }
+
+      const payload = (await response.json()) as GoogleSupportBreakResponse;
+      if (payload.error) {
+        this.logger.error(
+          'External support-break dataset reported an error flag',
+        );
+        return null;
+      }
+
+      if (!Array.isArray(payload.data) || !payload.data.length) {
+        this.logger.warn('External support-break dataset returned no rows');
+        return null;
+      }
+
+      return payload.data;
+    } catch (error) {
+      this.logger.error('Error fetching external support-break dataset', error);
+      return null;
+    }
+  }
+
+  private mapGoogleSupportBreakRow(
+    row: GoogleSupportBreakRow,
+  ): SupportBreakLoser | null {
+    const symbol = this.asString(row.Ticker)?.trim().toUpperCase();
+    if (!symbol || !this.symbolPattern.test(symbol)) {
+      return null;
+    }
+
+    const parseValue = (value?: number | string): number | null => {
+      if (typeof value === 'string' && !value.trim()) {
+        return null;
+      }
+      return this.normalizeNumeric(value);
+    };
+
+    const price = parseValue(row.Price);
+    if (price === null) {
+      return null;
+    }
+
+    const changePercentRaw = parseValue(row['Change %']);
+    const changePercent =
+      changePercentRaw !== null && Number.isFinite(changePercentRaw)
+        ? changePercentRaw
+        : 0;
+
+    const support1 = this.roundTo(parseValue(row['Support 1']));
+    const support2 = this.roundTo(parseValue(row['Support 2']));
+    const resistance1 = this.roundTo(parseValue(row['Resistance 1']));
+    const resistance2 = this.roundTo(parseValue(row['Resistance 2']));
+    const rsi = this.roundTo(parseValue(row.RSI));
+    const ema50 = this.roundTo(parseValue(row['EMA 50']));
+    const ema200 = this.roundTo(parseValue(row['EMA 200']));
+    const companyName = this.asString(row['Company name'])?.trim() ?? null;
+    const group = this.asString(row.Group)?.trim() ?? null;
+
+    const changeValue = this.roundTo(
+      price * (changePercent !== null ? changePercent / 100 : 0),
+    );
+
+    let belowSupportPercent: number | null = null;
+    let distanceToSupportPercent: number | null = null;
+
+    if (support1 !== null && support1 !== 0) {
+      const deltaPercent = this.roundTo(((price - support1) / support1) * 100);
+      if (deltaPercent !== null) {
+        if (deltaPercent < 0) {
+          belowSupportPercent = deltaPercent;
+        } else {
+          distanceToSupportPercent = deltaPercent;
+        }
+      }
+    }
+
+    return {
+      symbol,
+      companyName,
+      lastPrice: price,
+      changePercent,
+      change: changeValue,
+      volume: null,
+      supportLevel: support1,
+      supportLevelSecondary: support2,
+      resistance1,
+      resistance2,
+      belowSupportPercent,
+      distanceToSupportPercent,
+      rsi,
+      ema50,
+      ema200,
+      group,
+    };
   }
 
   private isLikelyUsExchange(value?: string, regionIsUs = false): boolean {
@@ -1527,156 +1662,44 @@ export class TechnicalIndicatorsService {
     minDropPercent?: number;
     resolution?: PriceResolution;
   } = {}): Promise<SupportBreakLosersResponse | null> {
-    if (!this.polygonApiKey && !this.alphaVantageApiKey) {
-      this.logger.error(
-        'No Polygon or Alpha Vantage API key configured; cannot compute support-break losers',
-      );
-      return null;
-    }
-
     const normalizedLimit = Math.max(1, limit);
     const normalizedTolerance = tolerancePercent >= 0 ? tolerancePercent : 1;
     const normalizedDrop = minDropPercent >= 0 ? minDropPercent : 0;
-    const now = Math.floor(Date.now() / 1000);
-    const lookbackSeconds = this.getSupportLookbackSeconds(resolution);
+    const normalizedResolution: PriceResolution = resolution ?? 'day';
 
-    const movers = await this.getAlphaVantageMarketMovers(normalizedLimit * 4);
-    if (!movers) {
+    this.logger.debug(
+      `Fetching external support-break dataset (limit=${normalizedLimit})`,
+    );
+
+    const rows = await this.fetchExternalSupportBreakRows();
+    if (!rows) {
       return null;
     }
 
-    const losers = movers.topLosers ?? [];
-    const inspectionCount = Math.min(losers.length, normalizedLimit * 4);
-    const candidates: SupportBreakLoser[] = [];
-    const skippedSymbols: Array<{ symbol: string; reason: string }> = [];
-    let inspected = 0;
+    const transformed = rows
+      .map((row) => this.mapGoogleSupportBreakRow(row))
+      .filter((row): row is SupportBreakLoser => row !== null);
 
-    for (const loser of losers.slice(0, inspectionCount)) {
-      inspected += 1;
-
-      if (loser.changePercent >= 0) {
-        skippedSymbols.push({
-          symbol: loser.symbol,
-          reason: 'NOT_NEGATIVE',
-        });
-        continue;
-      }
-
-      if (
-        normalizedDrop > 0 &&
-        Math.abs(loser.changePercent) < normalizedDrop
-      ) {
-        skippedSymbols.push({
-          symbol: loser.symbol,
-          reason: 'DROP_TOO_SMALL',
-        });
-        continue;
-      }
-
-      const history = await this.fetchPriceSeries(
-        loser.symbol,
-        resolution,
-        now - lookbackSeconds,
-        now,
+    if (!transformed.length) {
+      this.logger.warn(
+        'External support-break dataset did not contain any valid rows',
       );
-
-      if (!history.points.length) {
-        skippedSymbols.push({
-          symbol: loser.symbol,
-          reason: 'NO_HISTORY',
-        });
-        continue;
-      }
-
-      const snapshot = this.buildSupportSnapshot(
-        history.points,
-        loser.lastPrice,
-      );
-
-      if (!snapshot) {
-        skippedSymbols.push({
-          symbol: loser.symbol,
-          reason: 'NO_LEVELS',
-        });
-        continue;
-      }
-
-      const {
-        supportLevel,
-        supportLevelSecondary,
-        resistance1,
-        resistance2,
-        belowSupportPercent,
-        distanceToSupportPercent,
-      } = snapshot;
-
-      const delta =
-        typeof belowSupportPercent === 'number' ? belowSupportPercent : null;
-
-      const nearSupport =
-        delta !== null && delta > 0 && delta <= normalizedTolerance;
-
-      const breachedSupport =
-        delta !== null && delta <= 0 && Math.abs(delta) <= normalizedTolerance;
-
-      if (!nearSupport && !breachedSupport) {
-        skippedSymbols.push({
-          symbol: loser.symbol,
-          reason: 'DISTANCE_TOLERANCE',
-        });
-        continue;
-      }
-
-      let companyName: string | null = null;
-      try {
-        const basics = await this.stockMetadataService.getCompanyBasics(
-          loser.symbol,
-        );
-        companyName = basics?.name ?? null;
-      } catch (metadataError) {
-        this.logger.debug(
-          `Company metadata lookup failed for ${loser.symbol}: ${metadataError instanceof Error ? metadataError.message : 'unknown error'}`,
-        );
-      }
-
-      const normalizedSupportLevel = this.roundTo(supportLevel);
-      const normalizedSecondarySupport = this.roundTo(supportLevelSecondary);
-      const normalizedResistance1 = this.roundTo(resistance1);
-      const normalizedResistance2 = this.roundTo(resistance2);
-      const normalizedBelowSupportPercent = this.roundTo(delta);
-      const normalizedDistancePercent = this.roundTo(distanceToSupportPercent);
-
-      candidates.push({
-        symbol: loser.symbol,
-        companyName,
-        lastPrice: loser.lastPrice,
-        changePercent: loser.changePercent,
-        change: loser.change,
-        volume: loser.volume ?? null,
-        supportLevel: normalizedSupportLevel,
-        supportLevelSecondary: normalizedSecondarySupport,
-        resistance1: normalizedResistance1,
-        resistance2: normalizedResistance2,
-        belowSupportPercent: normalizedBelowSupportPercent,
-        distanceToSupportPercent: normalizedDistancePercent,
-      });
-
-      if (candidates.length >= normalizedLimit) {
-        break;
-      }
+      return null;
     }
+
+    const limited = transformed.slice(0, normalizedLimit);
 
     return {
       timestamp: new Date(),
-      stocks: candidates,
+      stocks: limited,
       metadata: {
         limitRequested: normalizedLimit,
-        inspected,
-        produced: candidates.length,
+        inspected: rows.length,
+        produced: limited.length,
         tolerancePercent: normalizedTolerance,
         minDropPercent: normalizedDrop,
-        resolution,
-        skippedSymbols,
+        resolution: normalizedResolution,
+        skippedSymbols: [],
       },
     };
   }

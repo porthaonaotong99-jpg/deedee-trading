@@ -742,7 +742,7 @@ export class TechnicalIndicatorsController {
   @ApiOperation({
     summary: 'Get US losers breaking support levels',
     description:
-      'Filters US stock market losers that are trading at or below nearby support levels computed from Polygon or Alpha Vantage history.',
+      'Returns curated US stock losers near/below support sourced from the external Google Apps Script dataset.',
   })
   @ApiQuery({
     name: 'limit',
@@ -754,21 +754,21 @@ export class TechnicalIndicatorsController {
     name: 'tolerancePercent',
     required: false,
     description:
-      'Maximum percentage distance from the detected level to consider a support breach (default 8%)',
+      'Legacy tolerance metadata (kept for compatibility, default 8%)',
     example: 8,
   })
   @ApiQuery({
     name: 'minDropPercent',
     required: false,
     description:
-      'Minimum intraday drop percentage required to classify as loser (default 0.5%)',
+      'Legacy intraday drop metadata (kept for compatibility, default 0.5%)',
     example: 0.5,
   })
   @ApiQuery({
     name: 'resolution',
     required: false,
     description:
-      'Resolution for support/resistance levels (daily, weekly, or monthly aggregates)',
+      'Resolution stored in metadata (daily, weekly, or monthly aggregates)',
     example: 'day',
     enum: ['day', 'week', 'month'],
   })

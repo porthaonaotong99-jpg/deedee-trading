@@ -85,7 +85,7 @@ export interface SupportBreakLoser {
   companyName?: string | null;
   lastPrice: number;
   changePercent: number;
-  change: number;
+  change: number | null;
   volume?: number | null;
   supportLevel?: number | null;
   supportLevelSecondary?: number | null;
@@ -93,6 +93,10 @@ export interface SupportBreakLoser {
   resistance2?: number | null;
   belowSupportPercent?: number | null;
   distanceToSupportPercent?: number | null;
+  rsi?: number | null;
+  ema50?: number | null;
+  ema200?: number | null;
+  group?: string | null;
 }
 
 export interface SupportBreakLosersMetadata {
