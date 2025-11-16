@@ -377,12 +377,12 @@ export class TechnicalIndicatorsController {
     example: 'asc',
     enum: ['asc', 'desc'],
   })
-  @ApiQuery({
-    name: 'sort',
-    required: false,
-    description: 'Polygon sort field (defaults to filing_date)',
-    example: 'filing_date',
-  })
+  // @ApiQuery({
+  //   name: 'sort',
+  //   required: false,
+  //   description: 'Polygon sort field (defaults to filing_date)',
+  //   example: 'filing_date',
+  // })
   @ApiResponse({ status: 200, description: 'Revenue series returned' })
   @ApiResponse({ status: 500, description: 'Failed to fetch revenue data' })
   async getRevenue(
