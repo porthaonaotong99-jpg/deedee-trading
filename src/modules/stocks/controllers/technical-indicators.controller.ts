@@ -346,7 +346,7 @@ export class TechnicalIndicatorsController {
     }
   }
 
-  @Get(':symbol/financials/revenue')
+  @Get(':symbol/financials')
   @ApiOperation({
     summary: 'Get quarterly revenue series',
     description:

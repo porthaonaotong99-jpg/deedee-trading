@@ -249,6 +249,25 @@ export interface PolygonFinancialStatements {
   comprehensive_income?: PolygonFinancialSection;
 }
 
+export interface StockFinancialMetricEntry {
+  period: string;
+  fiscalPeriod?: string | null;
+  fiscalYear?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  filingDate?: string | null;
+  value: number | null;
+  valueFormatted?: string | null;
+  yoyChangePercent: number | null;
+}
+
+export interface StockFinancialMetrics {
+  totalRevenue: StockFinancialMetricEntry[];
+  grossProfit: StockFinancialMetricEntry[];
+  operatingIncome: StockFinancialMetricEntry[];
+  netIncome: StockFinancialMetricEntry[];
+}
+
 export interface PolygonFinancialResult {
   start_date?: string;
   end_date?: string;
@@ -274,11 +293,13 @@ export interface StockRevenueResponse {
   count?: number;
   next_url?: string | null;
   results: PolygonFinancialResult[];
+  metrics: StockFinancialMetrics;
   metadata: {
     provider: 'polygon';
     limit: number;
     timeframe: PolygonFinancialTimeframe;
     order: 'asc' | 'desc';
+    normalizedOrder?: 'asc' | 'desc';
     sort: string;
     hasApiKey: boolean;
     fetchedAt: Date;

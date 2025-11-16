@@ -18,6 +18,8 @@ import {
   StockRevenueResponse,
   PolygonFinancialResult,
   PolygonFinancialTimeframe,
+  PolygonFinancialValue,
+  StockFinancialMetrics,
   SupportBreakLoser,
   SupportBreakLosersResponse,
   SupportLevelsSnapshot,
@@ -542,6 +544,159 @@ export class TechnicalIndicatorsService {
       high: null,
       low: null,
       volume: null,
+    };
+  }
+
+  private getFinancialResultTimestamp(result: PolygonFinancialResult): number {
+    const candidates = [
+      result.end_date,
+      result.start_date,
+      result.filing_date,
+      result.acceptance_datetime,
+    ];
+    for (const candidate of candidates) {
+      if (!candidate) {
+        continue;
+      }
+      const timestamp = Date.parse(candidate);
+      if (!Number.isNaN(timestamp)) {
+        return timestamp;
+      }
+    }
+    return 0;
+  }
+
+  private sortFinancialResults(
+    results: PolygonFinancialResult[],
+  ): PolygonFinancialResult[] {
+    return [...results].sort(
+      (a, b) =>
+        this.getFinancialResultTimestamp(a) -
+        this.getFinancialResultTimestamp(b),
+    );
+  }
+
+  private buildFinancialPeriodLabel(result: PolygonFinancialResult): string {
+    const period = result.fiscal_period?.trim();
+    const year = result.fiscal_year?.trim();
+    if (period && year) {
+      return `${period} ${year}`;
+    }
+    const fallback = result.end_date ?? result.filing_date ?? result.start_date;
+    return fallback ?? 'Unknown period';
+  }
+
+  private extractFinancialValue(value?: PolygonFinancialValue): number | null {
+    if (value === null) {
+      return null;
+    }
+    if (value?.value === null || value?.value === undefined) {
+      return null;
+    }
+    return Number.isFinite(value.value) ? value.value : null;
+  }
+
+  private computeFinancialYoy(
+    results: PolygonFinancialResult[],
+    index: number,
+    timeframe: PolygonFinancialTimeframe,
+    extractor: (
+      financials?: PolygonFinancialResult['financials'],
+    ) => number | null,
+  ): number | null {
+    const current = extractor(results[index]?.financials);
+    if (current === null) {
+      return null;
+    }
+    const offset = timeframe === 'quarterly' ? 4 : 1;
+    const comparison = results[index - offset];
+    if (!comparison) {
+      return null;
+    }
+    const previous = extractor(comparison.financials);
+    if (previous === null || previous === 0) {
+      return null;
+    }
+    return this.roundTo(((current - previous) / previous) * 100, 1);
+  }
+
+  private formatFinancialValue(value: number | null): string | null {
+    if (value === null) {
+      return null;
+    }
+    const abs = Math.abs(value);
+    const units = [
+      { threshold: 1_000_000_000_000, suffix: 'T', divisor: 1_000_000_000_000 },
+      { threshold: 1_000_000_000, suffix: 'B', divisor: 1_000_000_000 },
+      { threshold: 1_000_000, suffix: 'M', divisor: 1_000_000 },
+      { threshold: 1_000, suffix: 'K', divisor: 1_000 },
+    ];
+
+    for (const unit of units) {
+      if (abs >= unit.threshold) {
+        const rounded = this.roundTo(value / unit.divisor, 2);
+        if (rounded === null) {
+          return null;
+        }
+        const prefix = value < 0 ? '-$' : '$';
+        return `${prefix}${Math.abs(rounded)}${unit.suffix}`;
+      }
+    }
+
+    const rounded = this.roundTo(value, 2);
+    if (rounded === null) {
+      return null;
+    }
+    const prefix = value < 0 ? '-$' : '$';
+    return `${prefix}${Math.abs(rounded)}`;
+  }
+
+  private buildFinancialMetrics(
+    results: PolygonFinancialResult[],
+    timeframe: PolygonFinancialTimeframe,
+  ): StockFinancialMetrics {
+    const buildEntries = (
+      extractor: (
+        financials?: PolygonFinancialResult['financials'],
+      ) => number | null,
+    ) =>
+      results.map((entry, index) => {
+        const value = extractor(entry.financials);
+        return {
+          period: this.buildFinancialPeriodLabel(entry),
+          fiscalPeriod: entry.fiscal_period ?? null,
+          fiscalYear: entry.fiscal_year ?? null,
+          startDate: entry.start_date ?? null,
+          endDate: entry.end_date ?? null,
+          filingDate: entry.filing_date ?? null,
+          value,
+          valueFormatted: this.formatFinancialValue(value),
+          yoyChangePercent: this.computeFinancialYoy(
+            results,
+            index,
+            timeframe,
+            extractor,
+          ),
+        };
+      });
+
+    return {
+      totalRevenue: buildEntries((financials) =>
+        this.extractFinancialValue(financials?.income_statement?.revenues),
+      ),
+      grossProfit: buildEntries((financials) =>
+        this.extractFinancialValue(financials?.income_statement?.gross_profit),
+      ),
+      operatingIncome: buildEntries((financials) =>
+        this.extractFinancialValue(
+          financials?.income_statement?.operating_income_loss,
+        ),
+      ),
+      netIncome: buildEntries((financials) =>
+        this.extractFinancialValue(
+          financials?.income_statement?.net_income_loss,
+        ),
+      ),
     };
   }
 
@@ -1565,11 +1720,18 @@ export class TechnicalIndicatorsService {
       count: undefined,
       next_url: undefined,
       results: [],
+      metrics: {
+        totalRevenue: [],
+        grossProfit: [],
+        operatingIncome: [],
+        netIncome: [],
+      },
       metadata: {
         provider: 'polygon',
         limit,
         timeframe,
         order,
+        normalizedOrder: order,
         sort,
         hasApiKey,
         fetchedAt: new Date(),
@@ -1614,7 +1776,7 @@ export class TechnicalIndicatorsService {
       base.status = payload.status;
       base.request_id = payload.request_id;
       base.count = payload.count;
-      base.next_url = payload.next_url ?? null;
+      // base.next_url = payload.next_url ?? null;
       base.results = Array.isArray(payload.results) ? payload.results : [];
 
       if (!base.results.length) {
@@ -1626,6 +1788,17 @@ export class TechnicalIndicatorsService {
         base.metadata.message = base.metadata.message ?? statusMessage;
         this.logger.warn(`${statusMessage} for ${upper}`);
       }
+
+      if (base.results.length) {
+        base.results = this.sortFinancialResults(base.results);
+        if (order !== 'asc') {
+          base.metadata.normalizedOrder = 'asc';
+        }
+      } else {
+        base.metadata.normalizedOrder = 'asc';
+      }
+
+      base.metrics = this.buildFinancialMetrics(base.results, timeframe);
 
       return base;
     } catch (error) {
