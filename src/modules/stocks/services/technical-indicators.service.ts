@@ -544,6 +544,7 @@ export class TechnicalIndicatorsService {
       high: null,
       low: null,
       volume: null,
+      companyName: row['Company name']?.toString().trim() || null,
     };
   }
 
@@ -1799,7 +1800,7 @@ export class TechnicalIndicatorsService {
       }
 
       base.metrics = this.buildFinancialMetrics(base.results, timeframe);
-      base.results = []
+      base.results = [];
 
       return base;
     } catch (error) {

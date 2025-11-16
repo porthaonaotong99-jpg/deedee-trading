@@ -16,6 +16,7 @@ export interface MarketMoverStock {
   high?: number | null;
   low?: number | null;
   volume?: number | null;
+  companyName?: string | null;
 }
 
 export interface MarketMoversResponse {
