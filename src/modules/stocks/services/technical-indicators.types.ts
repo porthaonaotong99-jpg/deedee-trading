@@ -204,7 +204,8 @@ export type StockPerformanceTimeframe =
   | '3M'
   | '6M'
   | 'YTD'
-  | '1Y';
+  | '1Y'
+  | '5Y';
 
 export interface StockPerformanceEntry {
   timeframe: StockPerformanceTimeframe;

@@ -1120,6 +1120,7 @@ export class TechnicalIndicatorsService {
     { label: '6M', days: 180 },
     { label: 'YTD', mode: 'YTD' },
     { label: '1Y', days: 365 },
+    { label: '5Y', days: 5 * 365 },
   ];
 
   private resolveHistoryRange(range: StockPriceHistoryRange): {
@@ -1158,8 +1159,11 @@ export class TechnicalIndicatorsService {
   }
 
   private getPerformanceWindowStart(): number {
-    // Fetch a little over one full year to support all timeframes reliably.
-    return Math.floor(Date.now() / 1000) - 400 * 86400;
+    // Fetch slightly more than five years of data to cover the longest timeframe bucket.
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const fiveYearsSeconds = 5 * 365 * 86400;
+    const bufferSeconds = 30 * 86400; // pad for market holidays/weekends
+    return nowSeconds - fiveYearsSeconds - bufferSeconds;
   }
 
   private getSupportLookbackSeconds(resolution: PriceResolution): number {
