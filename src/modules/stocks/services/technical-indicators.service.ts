@@ -1799,6 +1799,7 @@ export class TechnicalIndicatorsService {
       }
 
       base.metrics = this.buildFinancialMetrics(base.results, timeframe);
+      base.results = []
 
       return base;
     } catch (error) {
