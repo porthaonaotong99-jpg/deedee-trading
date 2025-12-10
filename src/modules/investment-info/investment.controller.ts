@@ -890,4 +890,27 @@ export class NewInvestmentController {
       message: 'Tier calculation completed successfully',
     });
   }
+
+  @UseGuards(JwtUserAuthGuard)
+  @Get('admin/stats')
+  @ApiOperation({
+    summary: 'Get investment request statistics (Admin)',
+    description: 'Get count of investment requests by status',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Statistics retrieved successfully',
+  })
+  async getInvestmentStats(@AuthUser() user: JwtPayload) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admin users can view statistics');
+    }
+
+    const stats = await this.investmentService.getInvestmentStats();
+
+    return handleSuccessOne({
+      data: stats,
+      message: 'Statistics retrieved successfully',
+    });
+  }
 }

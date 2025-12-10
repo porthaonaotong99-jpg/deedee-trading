@@ -5,6 +5,7 @@ import {
   Query,
   UseGuards,
   ForbiddenException,
+  Put,
 } from '@nestjs/common';
 import { Controller } from '@nestjs/common';
 import {
@@ -15,7 +16,6 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { TransferHistoryService } from '../transfer-history.service';
-import { JwtUserAuthGuard } from '../../auth/guards/jwt-user.guard';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import {
   handleSuccessOne,
@@ -23,6 +23,7 @@ import {
 } from '../../../common/utils/response.util';
 import { AuthUser } from '../../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../../common/interfaces';
+import { JwtUserAuthGuard } from '../../auth/guards/jwt-user.guard';
 
 @ApiTags('Admin Transfer History')
 @ApiBearerAuth()
@@ -59,11 +60,32 @@ export class AdminTransferHistoryController {
     required: false,
     description: 'Filter by created_at end date (inclusive). YYYY-MM-DD or ISO',
   })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Filter by status',
+    enum: ['pending', 'approved', 'rejected'],
+  })
+  @ApiQuery({
+    name: 'identify',
+    required: false,
+    description: 'Filter by transfer type',
+    enum: [
+      'recharge',
+      'withdraw',
+      'invest',
+      'call_payment',
+      'video_payment',
+      'chat_payment',
+    ],
+  })
   async findAll(
     @AuthUser() user: JwtPayload,
     @Query() query: PaginationQueryDto,
     @Query('start_date') start_date?: string,
     @Query('end_date') end_date?: string,
+    @Query('status') status?: string,
+    @Query('identify') identify?: string,
   ) {
     if (user.type !== 'user')
       throw new ForbiddenException('Invalid token type for user route');
@@ -76,6 +98,8 @@ export class AdminTransferHistoryController {
     const result = await this.service.findAll(query, {
       startDate: parsedStart,
       endDate: parsedEnd,
+      status,
+      identify,
     });
     return handleSuccessPaginated({
       data: result.data,
@@ -87,11 +111,49 @@ export class AdminTransferHistoryController {
     });
   }
 
+  @Get('stats')
+  @ApiOperation({ summary: 'Get transfer statistics by status (admin)' })
+  async getStats(@AuthUser() user: JwtPayload) {
+    if (user.type !== 'user')
+      throw new ForbiddenException('Invalid token type for user route');
+
+    const stats = await this.service.getStats();
+    return handleSuccessOne({ data: stats, message: 'Stats retrieved' });
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get transfer by id (admin)' })
   @ApiParam({ name: 'id', description: 'Transfer history id' })
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.service.findOne(id);
     return handleSuccessOne({ data, message: 'Transfer found' });
+  }
+
+  @Put(':id/approve')
+  @ApiOperation({ summary: 'Approve transfer (admin)' })
+  @ApiParam({ name: 'id', description: 'Transfer history id' })
+  async approve(
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user')
+      throw new ForbiddenException('Invalid token type for user route');
+
+    const data = await this.service.approve(id, user.sub);
+    return handleSuccessOne({ data, message: 'Transfer approved' });
+  }
+
+  @Put(':id/reject')
+  @ApiOperation({ summary: 'Reject transfer (admin)' })
+  @ApiParam({ name: 'id', description: 'Transfer history id' })
+  async reject(
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user')
+      throw new ForbiddenException('Invalid token type for user route');
+
+    const data = await this.service.reject(id, user.sub);
+    return handleSuccessOne({ data, message: 'Transfer rejected' });
   }
 }

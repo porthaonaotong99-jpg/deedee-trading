@@ -438,16 +438,17 @@ export class CustomerSubmitPaymentSlipDto {
 }
 
 export class AdminApprovePickDto {
-  @ApiProperty({
-    description: 'Admin response message to customer',
+  @ApiPropertyOptional({
+    description: 'Admin response message to customer (optional for approval, recommended for rejection)',
     example: 'Great choice! This stock has strong fundamentals.',
     minLength: 1,
     maxLength: 1000,
   })
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(1000)
-  admin_response: string;
+  admin_response?: string;
 
   @ApiPropertyOptional({
     description: 'Whether to approve or reject the pick',

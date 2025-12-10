@@ -210,11 +210,10 @@ export class AdminStockPicksController {
     });
   }
 
-  @Get('pending-approvals')
+  @Get('customer-picks')
   @ApiOperation({
-    summary: 'Get pending customer picks (Admin only)',
-    description:
-      'Get list of customer stock picks with payment slips awaiting admin approval',
+    summary: 'Get customer picks (Admin only)',
+    description: 'Get list of customer stock picks with optional status filter',
   })
   @ApiQuery({
     name: 'page',
@@ -228,24 +227,31 @@ export class AdminStockPicksController {
     type: Number,
     description: 'Items per page',
   })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    type: String,
+    description:
+      'Filter by status (payment_submitted, approved, rejected, etc.)',
+  })
   @ApiResponse({
     status: 200,
-    description: 'Pending approvals retrieved successfully',
+    description: 'Customer picks retrieved successfully',
   })
   async getPendingApprovals(
     @AuthUser() user: JwtPayload,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @Query('status') status?: string,
   ) {
     if (user.type !== 'user') {
-      throw new ForbiddenException(
-        'Only admin users can view pending approvals',
-      );
+      throw new ForbiddenException('Only admin users can view customer picks');
     }
 
     const result = await this.stockPicksService.getPendingApprovals(
       page,
       limit,
+      status,
     );
 
     return handleSuccessPaginated({
@@ -358,6 +364,28 @@ export class AdminStockPicksController {
     return handleSuccessOne({
       data: result,
       message: 'Customer pick rejected successfully',
+    });
+  }
+
+  @Get('customer-picks/stats')
+  @ApiOperation({
+    summary: 'Get customer picks statistics (Admin only)',
+    description: 'Get count of picks by status',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Statistics retrieved successfully',
+  })
+  async getCustomerPicksStats(@AuthUser() user: JwtPayload) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admin users can view statistics');
+    }
+
+    const stats = await this.stockPicksService.getCustomerPicksStats();
+
+    return handleSuccessOne({
+      data: stats,
+      message: 'Statistics retrieved successfully',
     });
   }
 }

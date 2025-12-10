@@ -523,7 +523,69 @@ export class CustomerServicesController {
     });
   }
 
-  @Get('admin/premium-membership/pending')
+  @Get('admin/premium-membership/subscriptions')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiOperation({
+    summary: 'Get all premium membership subscriptions (admin)',
+    description:
+      'List of all premium membership subscriptions from customer_services table. Shows actual service records, not payment records.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (1-based, default 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size (default 20, max 100)',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    type: String,
+    description: 'Filter by status: active, pending, cancelled, expired',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search by customer name, email, or username',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Premium membership subscriptions retrieved',
+  })
+  async getPremiumMembershipSubscriptions(
+    @AuthUser() user: JwtPayload,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can view subscriptions');
+    }
+    const result =
+      await this.customersService.getPremiumMembershipSubscriptions({
+        page: page ? parseInt(page, 10) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+        status: status,
+        search: search,
+      });
+    return handleSuccessPaginated({
+      data: result.data,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      message: 'Premium membership subscriptions retrieved',
+    });
+  }
+
+  @Get('admin/premium-membership')
   @UseGuards(JwtUserAuthGuard)
   @ApiOperation({
     summary: '[Group: Apply/Renew Manual] Pending payment slips (admin)',
@@ -542,6 +604,25 @@ export class CustomerServicesController {
     type: Number,
     description: 'Page size (default 20, max 100)',
   })
+  @ApiQuery({
+    name: 'payment_status',
+    required: false,
+    enum: PaymentStatus,
+    description: 'Filter by exact payment status (pending, succeeded, etc.)',
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    type: String,
+    description:
+      'Filter by display status group: pending, active, cancelled, expired',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search by customer name, email, or username',
+  })
   @ApiResponse({
     status: 200,
     description: 'Pending premium membership applications retrieved',
@@ -550,6 +631,9 @@ export class CustomerServicesController {
     @AuthUser() user: JwtPayload,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('payment_status') paymentStatus?: PaymentStatus,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
   ) {
     if (user.type !== 'user') {
       throw new ForbiddenException('Only admins can view pending applications');
@@ -557,6 +641,9 @@ export class CustomerServicesController {
     const result = await this.customersService.getPendingPremiumMemberships({
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
+      payment_status: paymentStatus,
+      status: status,
+      search: search,
     });
     return handleSuccessPaginated({
       data: result.data,
@@ -857,7 +944,7 @@ export class CustomerServicesController {
     });
   }
 
-  @Get('admin/international-stock-account/pending')
+  @Get('admin/international-stock-account')
   @UseGuards(JwtUserAuthGuard)
   @ApiOperation({
     summary: 'List pending International Stock Account applications (admin)',
@@ -876,25 +963,38 @@ export class CustomerServicesController {
     type: Number,
     description: 'Page size (default 20, max 100)',
   })
+  @ApiQuery({
+    name: 'kyc_status',
+    required: false,
+    enum: KycStatus,
+    description: 'Filter by KYC status',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search by customer name, email, or username',
+  })
   @ApiResponse({
     status: 200,
-    description:
-      'Pending international stock account applications retrieved',
+    description: 'Pending international stock account applications retrieved',
   })
   async getPendingInternationalStockAccounts(
     @AuthUser() user: JwtPayload,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('kyc_status') kycStatus?: KycStatus,
+    @Query('search') search?: string,
   ) {
     if (user.type !== 'user') {
-      throw new ForbiddenException(
-        'Only admins can view pending applications',
-      );
+      throw new ForbiddenException('Only admins can view pending applications');
     }
     const result =
       await this.customersService.getPendingInternationalStockAccounts({
         page: page ? parseInt(page, 10) : undefined,
         limit: limit ? parseInt(limit, 10) : undefined,
+        kyc_status: kycStatus,
+        search: search,
       });
     return handleSuccessPaginated({
       data: result.data,
@@ -906,7 +1006,7 @@ export class CustomerServicesController {
     });
   }
 
-  @Get('admin/guaranteed-returns/pending')
+  @Get('admin/guaranteed-returns')
   @UseGuards(JwtUserAuthGuard)
   @ApiOperation({
     summary: 'List pending Guaranteed Returns applications (admin)',
@@ -925,6 +1025,18 @@ export class CustomerServicesController {
     type: Number,
     description: 'Page size (default 20, max 100)',
   })
+  @ApiQuery({
+    name: 'payment_status',
+    required: false,
+    enum: PaymentStatus,
+    description: 'Filter by payment status',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search by customer name, email, or username',
+  })
   @ApiResponse({
     status: 200,
     description: 'Pending guaranteed returns applications retrieved',
@@ -933,15 +1045,17 @@ export class CustomerServicesController {
     @AuthUser() user: JwtPayload,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('payment_status') paymentStatus?: PaymentStatus,
+    @Query('search') search?: string,
   ) {
     if (user.type !== 'user') {
-      throw new ForbiddenException(
-        'Only admins can view pending applications',
-      );
+      throw new ForbiddenException('Only admins can view pending applications');
     }
     const result = await this.customersService.getPendingGuaranteedReturns({
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
+      payment_status: paymentStatus,
+      search: search,
     });
     return handleSuccessPaginated({
       data: result.data,
@@ -989,9 +1103,7 @@ export class CustomerServicesController {
     @Query('limit') limit?: string,
   ) {
     if (user.type !== 'user') {
-      throw new ForbiddenException(
-        'Only admins can view pending applications',
-      );
+      throw new ForbiddenException('Only admins can view pending applications');
     }
     const result = await this.customersService.getAllPendingServices(
       serviceType,

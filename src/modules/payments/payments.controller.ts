@@ -1,24 +1,19 @@
 import {
   Controller,
   Get,
-  Post,
-  Body,
   Param,
   Query,
   UseGuards,
-  ValidationPipe,
   ParseUUIDPipe,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiBody,
   ApiOperation,
   ApiQuery,
   ApiTags,
   ApiParam,
-  ApiResponse,
 } from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -34,14 +29,6 @@ import {
   handleSuccessPaginated,
   handleSuccessOne,
 } from '../../common/utils/response.util';
-
-class ApprovePaymentDto {
-  notes?: string;
-}
-
-class RejectPaymentDto {
-  reason!: string;
-}
 
 class PaymentFilterDto extends PaginationQueryDto {
   status?: PaymentStatus;
@@ -167,106 +154,6 @@ export class PaymentsController {
     return handleSuccessOne({
       data: payment,
       message: 'Payment found',
-    });
-  }
-
-  @Post(':id/approve')
-  @UseGuards(JwtUserAuthGuard, PermissionsGuard)
-  @Permissions('payments:approve')
-  @ApiOperation({ summary: 'Approve a payment' })
-  @ApiParam({ name: 'id', description: 'Payment ID' })
-  @ApiBody({ type: ApprovePaymentDto })
-  @ApiResponse({ status: 200, description: 'Payment approved successfully' })
-  async approvePayment(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body(ValidationPipe) dto: ApprovePaymentDto,
-    @AuthUser() user: JwtPayload,
-  ) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admins can approve payments');
-    }
-
-    const payment = await this.paymentRepo.findOne({
-      where: { id },
-      relations: ['customer'],
-    });
-
-    if (!payment) {
-      throw new NotFoundException('Payment not found');
-    }
-
-    if (
-      payment.status !== PaymentStatus.PENDING &&
-      payment.status !== PaymentStatus.PAYMENT_SLIP_SUBMITTED
-    ) {
-      throw new ForbiddenException(
-        `Cannot approve payment with status: ${payment.status}`,
-      );
-    }
-
-    payment.status = PaymentStatus.SUCCEEDED;
-    payment.paid_at = new Date();
-    payment.approved_by_admin_id = user.sub;
-    payment.approved_at = new Date();
-    if (dto.notes) {
-      payment.admin_notes = dto.notes;
-    }
-
-    const updatedPayment = await this.paymentRepo.save(payment);
-
-    return handleSuccessOne({
-      data: updatedPayment,
-      message: 'Payment approved successfully',
-    });
-  }
-
-  @Post(':id/reject')
-  @UseGuards(JwtUserAuthGuard, PermissionsGuard)
-  @Permissions('payments:reject')
-  @ApiOperation({ summary: 'Reject a payment' })
-  @ApiParam({ name: 'id', description: 'Payment ID' })
-  @ApiBody({ type: RejectPaymentDto })
-  @ApiResponse({ status: 200, description: 'Payment rejected successfully' })
-  async rejectPayment(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body(ValidationPipe) dto: RejectPaymentDto,
-    @AuthUser() user: JwtPayload,
-  ) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admins can reject payments');
-    }
-
-    const payment = await this.paymentRepo.findOne({
-      where: { id },
-      relations: ['customer'],
-    });
-
-    if (!payment) {
-      throw new NotFoundException('Payment not found');
-    }
-
-    if (
-      payment.status !== PaymentStatus.PENDING &&
-      payment.status !== PaymentStatus.PAYMENT_SLIP_SUBMITTED
-    ) {
-      throw new ForbiddenException(
-        `Cannot reject payment with status: ${payment.status}`,
-      );
-    }
-
-    payment.status = PaymentStatus.FAILED;
-    payment.failed_at = new Date();
-    payment.failure_reason = dto.reason;
-    payment.approved_by_admin_id = user.sub;
-    if (dto.reason) {
-      payment.admin_notes = `Rejected: ${dto.reason}`;
-    }
-
-    const updatedPayment = await this.paymentRepo.save(payment);
-
-    return handleSuccessOne({
-      data: updatedPayment,
-      message: 'Payment rejected successfully',
     });
   }
 }

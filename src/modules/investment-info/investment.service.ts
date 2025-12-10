@@ -1020,4 +1020,31 @@ export class InvestmentService {
         return RiskTolerance.MEDIUM; // Default fallback
     }
   }
+
+  async getInvestmentStats(): Promise<{
+    total: number;
+    pending: number;
+    approved: number;
+    rejected: number;
+  }> {
+    const [total, pending, approved, rejected] = await Promise.all([
+      this.requestRepo.count(),
+      this.requestRepo.count({
+        where: { status: InvestmentRequestStatus.PENDING },
+      }),
+      this.requestRepo.count({
+        where: { status: InvestmentRequestStatus.APPROVED },
+      }),
+      this.requestRepo.count({
+        where: { status: InvestmentRequestStatus.REJECTED },
+      }),
+    ]);
+
+    return {
+      total,
+      pending,
+      approved,
+      rejected,
+    };
+  }
 }

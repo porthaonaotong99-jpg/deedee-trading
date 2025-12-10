@@ -453,6 +453,7 @@ export class StockPicksService {
   async getPendingApprovals(
     page = 1,
     limit = 20,
+    status?: string,
   ): Promise<
     PaginatedResult<
       CustomerStockPickResponseDto & {
@@ -476,10 +477,14 @@ export class StockPicksService {
     const queryBuilder = this.customerPickRepo
       .createQueryBuilder('cp')
       .leftJoinAndSelect('cp.stock_pick', 'sp')
-      .leftJoinAndSelect('cp.customer', 'c')
-      .where('cp.status = :status', {
-        status: CustomerPickStatus.PAYMENT_SUBMITTED,
-      })
+      .leftJoinAndSelect('cp.customer', 'c');
+
+    // Apply status filter if provided, otherwise default to payment_submitted
+    if (status) {
+      queryBuilder.where('cp.status = :status', { status });
+    }
+
+    queryBuilder
       .orderBy('cp.payment_submitted_at', 'ASC')
       .skip(skip)
       .take(validLimit);
@@ -895,6 +900,44 @@ export class StockPicksService {
           (considered > 0 ? overallReturnPercent / considered : 0).toFixed(1),
         ),
       },
+    };
+  }
+
+  async getCustomerPicksStats(): Promise<{
+    total: number;
+    selected: number;
+    payment_submitted: number;
+    approved: number;
+    rejected: number;
+    email_sent: number;
+  }> {
+    const [total, selected, payment_submitted, approved, rejected, email_sent] =
+      await Promise.all([
+        this.customerPickRepo.count(),
+        this.customerPickRepo.count({
+          where: { status: CustomerPickStatus.SELECTED },
+        }),
+        this.customerPickRepo.count({
+          where: { status: CustomerPickStatus.PAYMENT_SUBMITTED },
+        }),
+        this.customerPickRepo.count({
+          where: { status: CustomerPickStatus.APPROVED },
+        }),
+        this.customerPickRepo.count({
+          where: { status: CustomerPickStatus.REJECTED },
+        }),
+        this.customerPickRepo.count({
+          where: { status: CustomerPickStatus.EMAIL_SENT },
+        }),
+      ]);
+
+    return {
+      total,
+      selected,
+      payment_submitted,
+      approved,
+      rejected,
+      email_sent,
     };
   }
 }

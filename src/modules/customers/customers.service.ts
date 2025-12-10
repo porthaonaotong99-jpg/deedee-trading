@@ -12,6 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import * as argon2 from 'argon2';
 import { Customer } from './entities/customer.entity';
+import { CustomerStatus } from '../../common/enums';
 import {
   CustomerService,
   CustomerServiceType,
@@ -108,6 +109,143 @@ export interface PendingPremiumMembership {
   };
 }
 
+export interface PremiumMembershipSubscription {
+  service_id: string;
+  customer_id: string;
+  customer_info: {
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+  };
+  service_type: CustomerServiceType;
+  active: boolean;
+  subscription_duration: SubscriptionDuration | null;
+  subscription_fee: number | null;
+  subscription_expires_at: Date | null;
+  subscription_package_id: string | null;
+  applied_at: Date;
+  latest_payment_status?: PaymentStatus | null;
+}
+
+export interface PendingInternationalStockAccount {
+  service_id: string;
+  customer_id: string;
+  customer_info: {
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    phone_number?: string;
+  };
+  service_type: CustomerServiceType;
+  active: boolean;
+  requires_payment: boolean;
+  applied_at: Date;
+  kyc_info?: {
+    kyc_id: string;
+    kyc_level: KycLevel;
+    kyc_status: KycStatus;
+    reviewed_at: Date | null;
+  };
+}
+
+export interface PendingGuaranteedReturn {
+  service_id: string;
+  customer_id: string;
+  customer_info: {
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    phone_number?: string;
+  };
+  service_type: CustomerServiceType;
+  active: boolean;
+  requires_payment: boolean;
+  invested_amount: number | null;
+  balance: number | null;
+  applied_at: Date;
+  kyc_info?: {
+    kyc_id: string;
+    kyc_level: KycLevel;
+    kyc_status: KycStatus;
+    reviewed_at: Date | null;
+  };
+  payment_info?: {
+    payment_id: string;
+    amount: number;
+    paid_at: Date | null;
+    status: PaymentStatus;
+    payment_slip_url?: string;
+  };
+}
+
+export interface PendingService {
+  service_id: string;
+  customer_id: string;
+  customer_info: {
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    phone_number?: string;
+  };
+  service_type: CustomerServiceType;
+  active: boolean;
+  requires_payment: boolean;
+  subscription_duration: SubscriptionDuration | null;
+  subscription_fee: number | null;
+  subscription_expires_at: Date | null;
+  invested_amount: number | null;
+  balance: number | null;
+  applied_at: Date;
+  kyc_info?: {
+    kyc_id: string;
+    kyc_level: KycLevel;
+    kyc_status: KycStatus;
+    reviewed_at: Date | null;
+  };
+  payment_info?: {
+    payment_id: string;
+    amount: number;
+    paid_at: Date | null;
+    status: PaymentStatus;
+    payment_slip_url?: string;
+  };
+}
+
+export interface ServiceTypeStats {
+  service_type: CustomerServiceType;
+  total_pending: number;
+  pending_with_payment: number;
+  pending_kyc_review: number;
+  approved_this_month: number;
+  rejected_this_month: number;
+  avg_approval_time_hours: number | null;
+}
+
+export interface ServiceStats {
+  by_service: ServiceTypeStats[];
+  total_pending: number;
+  total_active: number;
+}
+
+export interface CustomerWithServices {
+  id: string;
+  first_name: string;
+  last_name: string;
+  username: string;
+  email: string;
+  phone_number: string | null;
+  status: CustomerStatus;
+  isVerify: boolean;
+  profile: string | null;
+  created_at: Date;
+  updated_at: Date;
+  services: ServiceStatusSummary[];
+}
+
 interface CreateCustomerDto {
   username: string;
   email: string;
@@ -181,7 +319,7 @@ export class CustomersService {
     return entity;
   }
 
-  async findOneWithServices(id: string) {
+  async findOneWithServices(id: string): Promise<CustomerWithServices> {
     const entity = await this.repo.findOne({
       where: { id },
       select: {
@@ -427,12 +565,9 @@ export class CustomersService {
     return this.repo.save(entity);
   }
 
-  async updateStatus(
-    id: string,
-    status: 'active' | 'inactive' | 'ban' | 'deleted',
-  ) {
+  async updateStatus(id: string, status: CustomerStatus) {
     const entity = await this.findOne(id);
-    entity.status = status as any;
+    entity.status = status;
     return this.repo.save(entity);
   }
 
@@ -2496,8 +2631,121 @@ export class CustomersService {
     };
   }
 
+  /**
+   * Get all premium membership subscriptions from customer_services table
+   * This returns actual service records, not payment records
+   */
+  async getPremiumMembershipSubscriptions(
+    options: PaginationOptions & {
+      status?: string;
+      search?: string;
+    } = {},
+  ): Promise<PaginatedResult<PremiumMembershipSubscription>> {
+    const { page, limit, skip } = PaginationUtil.calculatePagination({
+      page: options.page,
+      limit: options.limit,
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
+
+    const qb = this.customerServiceRepo
+      .createQueryBuilder('s')
+      .leftJoinAndSelect('s.customer', 'c')
+      .leftJoin(
+        'payments',
+        'p',
+        'p.service_id = s.id AND p.created_at = (SELECT MAX(created_at) FROM payments WHERE service_id = s.id)',
+      )
+      .where('s.service_type = :stype', {
+        stype: CustomerServiceType.PREMIUM_MEMBERSHIP,
+      })
+      .orderBy('s.applied_at', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    // Filter by status (active/pending/cancelled/expired)
+    if (options.status) {
+      const now = new Date();
+      switch (options.status) {
+        case 'active':
+          qb.andWhere('s.active = :active', { active: true }).andWhere(
+            '(s.subscription_expires_at IS NULL OR s.subscription_expires_at > :now)',
+            { now },
+          );
+          break;
+        case 'pending':
+          qb.andWhere('s.active = :active', { active: false }).andWhere(
+            "(s.subscription_expires_at IS NULL OR (s.subscription_expires_at > :now AND p.status IN ('pending', 'payment_slip_submitted', 'processing')))",
+            { now },
+          );
+          break;
+        case 'expired':
+          qb.andWhere('s.subscription_expires_at IS NOT NULL').andWhere(
+            's.subscription_expires_at <= :now',
+            { now },
+          );
+          break;
+        case 'cancelled':
+          qb.andWhere('s.active = :active', { active: false }).andWhere(
+            "(p.status IN ('failed', 'canceled') OR (s.subscription_expires_at IS NOT NULL AND s.subscription_expires_at <= :now))",
+            { now },
+          );
+          break;
+      }
+    }
+
+    // Search by customer name, email, or username
+    if (options.search) {
+      qb.andWhere(
+        "(c.username ILIKE :search OR c.email ILIKE :search OR c.first_name ILIKE :search OR c.last_name ILIKE :search OR CONCAT(c.first_name, ' ', c.last_name) ILIKE :search)",
+        { search: `%${options.search}%` },
+      );
+    }
+
+    const [services, total] = await qb.getManyAndCount();
+
+    // Get latest payment status for each service
+    const serviceIds = services.map((s) => s.id);
+    const latestPayments = await this.paymentRepo
+      .createQueryBuilder('p')
+      .where('p.service_id IN (:...serviceIds)', { serviceIds })
+      .andWhere(
+        'p.created_at = (SELECT MAX(created_at) FROM payments WHERE service_id = p.service_id)',
+      )
+      .getMany();
+
+    const paymentMap = new Map(
+      latestPayments.map((p) => [p.service_id, p.status]),
+    );
+
+    const data: PremiumMembershipSubscription[] = services.map((service) => ({
+      service_id: service.id,
+      customer_id: service.customer_id,
+      customer_info: {
+        username: service.customer?.username || '',
+        email: service.customer?.email || '',
+        first_name: service.customer?.first_name || '',
+        last_name: service.customer?.last_name || '',
+      },
+      service_type: service.service_type,
+      active: service.active,
+      subscription_duration: service.subscription_duration,
+      subscription_fee: service.subscription_fee,
+      subscription_expires_at: service.subscription_expires_at,
+      subscription_package_id: service.subscription_package_id,
+      applied_at: service.applied_at,
+      latest_payment_status: paymentMap.get(service.id) || null,
+    }));
+
+    return PaginationUtil.createPaginatedResult(data, total, { page, limit });
+  }
+
   async getPendingPremiumMemberships(
-    options: PaginationOptions = {},
+    options: PaginationOptions & {
+      payment_status?: PaymentStatus;
+      status?: string;
+      search?: string;
+    } = {},
   ): Promise<PaginatedResult<PendingPremiumMembership>> {
     const { page, limit, skip } = PaginationUtil.calculatePagination({
       page: options.page,
@@ -2510,13 +2758,42 @@ export class CustomersService {
       .createQueryBuilder('p')
       .leftJoinAndSelect('p.service', 's')
       .leftJoinAndSelect('s.customer', 'c')
-      .where('p.status = :status', { status: PaymentStatus.PENDING })
-      .andWhere('s.service_type = :stype', {
+      .where('s.service_type = :stype', {
         stype: CustomerServiceType.PREMIUM_MEMBERSHIP,
       })
       .orderBy('p.created_at', 'DESC')
       .skip(skip)
       .take(limit);
+
+    // Filter by exact payment status (takes priority)
+    if (options.payment_status) {
+      qb.andWhere('p.status = :status', { status: options.payment_status });
+    }
+    // Filter by display status group
+    else if (options.status && options.status !== 'all') {
+      const statusMap: Record<string, PaymentStatus[]> = {
+        active: [PaymentStatus.SUCCEEDED],
+        pending: [
+          PaymentStatus.PENDING,
+          PaymentStatus.PAYMENT_SLIP_SUBMITTED,
+          PaymentStatus.PROCESSING,
+        ],
+        cancelled: [PaymentStatus.FAILED, PaymentStatus.CANCELED],
+        expired: [PaymentStatus.REFUNDED, PaymentStatus.PARTIALLY_REFUNDED],
+      };
+      const statuses = statusMap[options.status];
+      if (statuses && statuses.length > 0) {
+        qb.andWhere('p.status IN (:...statuses)', { statuses });
+      }
+    }
+
+    // Search by customer name, email, or username
+    if (options.search) {
+      qb.andWhere(
+        "(c.username ILIKE :search OR c.email ILIKE :search OR c.first_name ILIKE :search OR c.last_name ILIKE :search OR CONCAT(c.first_name, ' ', c.last_name) ILIKE :search)",
+        { search: `%${options.search}%` },
+      );
+    }
 
     const [payments, total] = await qb.getManyAndCount();
 
@@ -2550,8 +2827,11 @@ export class CustomersService {
    * Get pending applications for International Stock Account
    */
   async getPendingInternationalStockAccounts(
-    options: PaginationOptions = {},
-  ): Promise<PaginatedResult<any>> {
+    options: PaginationOptions & {
+      kyc_status?: KycStatus;
+      search?: string;
+    } = {},
+  ): Promise<PaginatedResult<PendingInternationalStockAccount>> {
     const { page, limit, skip } = PaginationUtil.calculatePagination({
       page: options.page,
       limit: options.limit,
@@ -2571,6 +2851,19 @@ export class CustomersService {
       .orderBy('s.applied_at', 'DESC')
       .skip(skip)
       .take(limit);
+
+    // Filter by KYC status
+    if (options.kyc_status) {
+      qb.andWhere('k.status = :kycStatus', { kycStatus: options.kyc_status });
+    }
+
+    // Search by customer name, email, or username
+    if (options.search) {
+      qb.andWhere(
+        "(c.username ILIKE :search OR c.email ILIKE :search OR c.first_name ILIKE :search OR c.last_name ILIKE :search OR CONCAT(c.first_name, ' ', c.last_name) ILIKE :search)",
+        { search: `%${options.search}%` },
+      );
+    }
 
     const [services, total] = await qb.getManyAndCount();
 
@@ -2605,8 +2898,11 @@ export class CustomersService {
    * Get pending applications for Guaranteed Returns
    */
   async getPendingGuaranteedReturns(
-    options: PaginationOptions = {},
-  ): Promise<PaginatedResult<any>> {
+    options: PaginationOptions & {
+      payment_status?: PaymentStatus;
+      search?: string;
+    } = {},
+  ): Promise<PaginatedResult<PendingGuaranteedReturn>> {
     const { page, limit, skip } = PaginationUtil.calculatePagination({
       page: options.page,
       limit: options.limit,
@@ -2627,6 +2923,21 @@ export class CustomersService {
       .orderBy('s.applied_at', 'DESC')
       .skip(skip)
       .take(limit);
+
+    // Filter by payment status
+    if (options.payment_status) {
+      qb.andWhere('p.status = :paymentStatus', {
+        paymentStatus: options.payment_status,
+      });
+    }
+
+    // Search by customer name, email, or username
+    if (options.search) {
+      qb.andWhere(
+        "(c.username ILIKE :search OR c.email ILIKE :search OR c.first_name ILIKE :search OR c.last_name ILIKE :search OR CONCAT(c.first_name, ' ', c.last_name) ILIKE :search)",
+        { search: `%${options.search}%` },
+      );
+    }
 
     const [services, total] = await qb.getManyAndCount();
 
@@ -2686,7 +2997,7 @@ export class CustomersService {
   async getAllPendingServices(
     serviceType?: CustomerServiceType,
     options: PaginationOptions = {},
-  ): Promise<PaginatedResult<any>> {
+  ): Promise<PaginatedResult<PendingService>> {
     const { page, limit, skip } = PaginationUtil.calculatePagination({
       page: options.page,
       limit: options.limit,
@@ -2710,9 +3021,17 @@ export class CustomersService {
     const [services, total] = await qb.getManyAndCount();
 
     const data = await Promise.all(
-      services.map(async (service) => {
+      services.map(async (service): Promise<PendingService> => {
         // Get payment info if service requires payment
-        let paymentInfo;
+        let paymentInfo:
+          | {
+              payment_id: string;
+              amount: number;
+              paid_at: Date | null;
+              status: PaymentStatus;
+              payment_slip_url?: string;
+            }
+          | undefined;
         if (service.requires_payment) {
           const payments = await this.paymentRepo.find({
             where: { service_id: service.id },
@@ -2769,7 +3088,7 @@ export class CustomersService {
   /**
    * Get service application statistics
    */
-  async getServiceStats(): Promise<any> {
+  async getServiceStats(): Promise<ServiceStats> {
     const serviceTypes = Object.values(CustomerServiceType);
 
     const statsByService = await Promise.all(

@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
 
+// Type-safe metadata - only allow JSON-serializable values
+export type PaymentMetadata = Record<string, string | number | boolean | null>;
+
 export interface PaymentIntent {
   id: string;
   amount: number;
@@ -7,7 +10,7 @@ export interface PaymentIntent {
   payment_url: string;
   status: 'pending' | 'succeeded' | 'failed' | 'canceled';
   expires_at: Date;
-  metadata?: Record<string, any>;
+  metadata?: PaymentMetadata;
 }
 
 export interface PaymentProvider {
@@ -15,7 +18,7 @@ export interface PaymentProvider {
     amount: number;
     currency: string;
     description: string;
-    metadata?: Record<string, any>;
+    metadata?: PaymentMetadata;
     returnUrl?: string;
     cancelUrl?: string;
   }): Promise<PaymentIntent>;
@@ -31,7 +34,7 @@ export class MockPaymentService implements PaymentProvider {
     amount: number;
     currency: string;
     description: string;
-    metadata?: Record<string, any>;
+    metadata?: PaymentMetadata;
     returnUrl?: string;
     cancelUrl?: string;
   }): Promise<PaymentIntent> {

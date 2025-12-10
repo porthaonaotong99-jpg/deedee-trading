@@ -24,6 +24,8 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { CustomersService } from './customers.service';
+import { Customer } from './entities/customer.entity';
+import { CustomerStatus } from '../../common/enums';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { JwtUserAuthGuard } from '../auth/guards/jwt-user.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -57,7 +59,7 @@ class UpdateCustomerDto {
 }
 
 class UpdateCustomerStatusDto {
-  status!: 'active' | 'inactive' | 'ban' | 'deleted';
+  status!: CustomerStatus;
 }
 
 @ApiTags('customers')
@@ -89,7 +91,7 @@ export class CustomersController {
   @ApiQuery({ name: 'limit', required: false })
   async findAll(
     @Query() query: PaginationQueryDto,
-  ): Promise<IPaginatedResponse<any>> {
+  ): Promise<IPaginatedResponse<Customer>> {
     const result = await this.service.findAll(query);
     return handleSuccessPaginated({
       data: result.data,
@@ -112,7 +114,7 @@ export class CustomersController {
 
   @Get('profile/me')
   @ApiOperation({ summary: 'Get current customer profile (self)' })
-  async profile(@AuthUser() user: JwtPayload): Promise<any> {
+  async profile(@AuthUser() user: JwtPayload) {
     // Only allow when token type is customer
     if (user.type !== 'customer') {
       // Reuse 403 semantics without importing ForbiddenException to keep minimal; could import instead.
@@ -187,7 +189,7 @@ export class CustomersController {
     if (user.type !== 'user') {
       throw new ForbiddenException('Only admins can ban customers');
     }
-    const data = await this.service.updateStatus(id, 'ban');
+    const data = await this.service.updateStatus(id, CustomerStatus.BAN);
     return handleSuccessOne({
       data,
       message: 'Customer banned successfully',
@@ -210,7 +212,7 @@ export class CustomersController {
     if (user.type !== 'user') {
       throw new ForbiddenException('Only admins can activate customers');
     }
-    const data = await this.service.updateStatus(id, 'active');
+    const data = await this.service.updateStatus(id, CustomerStatus.ACTIVE);
     return handleSuccessOne({
       data,
       message: 'Customer activated successfully',
@@ -233,7 +235,7 @@ export class CustomersController {
     if (user.type !== 'user') {
       throw new ForbiddenException('Only admins can deactivate customers');
     }
-    const data = await this.service.updateStatus(id, 'inactive');
+    const data = await this.service.updateStatus(id, CustomerStatus.INACTIVE);
     return handleSuccessOne({
       data,
       message: 'Customer deactivated successfully',
