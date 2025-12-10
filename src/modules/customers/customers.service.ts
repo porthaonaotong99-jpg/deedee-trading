@@ -427,6 +427,15 @@ export class CustomersService {
     return this.repo.save(entity);
   }
 
+  async updateStatus(
+    id: string,
+    status: 'active' | 'inactive' | 'ban' | 'deleted',
+  ) {
+    const entity = await this.findOne(id);
+    entity.status = status as any;
+    return this.repo.save(entity);
+  }
+
   async remove(id: string) {
     const entity = await this.findOne(id);
     await this.repo.remove(entity);
@@ -2535,5 +2544,301 @@ export class CustomersService {
     }));
 
     return PaginationUtil.createPaginatedResult(data, total, { page, limit });
+  }
+
+  /**
+   * Get pending applications for International Stock Account
+   */
+  async getPendingInternationalStockAccounts(
+    options: PaginationOptions = {},
+  ): Promise<PaginatedResult<any>> {
+    const { page, limit, skip } = PaginationUtil.calculatePagination({
+      page: options.page,
+      limit: options.limit,
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
+
+    const qb = this.customerServiceRepo
+      .createQueryBuilder('s')
+      .leftJoinAndSelect('s.customer', 'c')
+      .leftJoinAndSelect('s.kyc', 'k')
+      .leftJoin('payments', 'p', 'p.service_id = s.id')
+      .where('s.service_type = :stype', {
+        stype: CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT,
+      })
+      .andWhere('s.active = :active', { active: false })
+      .orderBy('s.applied_at', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [services, total] = await qb.getManyAndCount();
+
+    const data = services.map((service) => ({
+      service_id: service.id,
+      customer_id: service.customer_id,
+      customer_info: {
+        username: service.customer?.username || '',
+        email: service.customer?.email || '',
+        first_name: service.customer?.first_name || '',
+        last_name: service.customer?.last_name || '',
+        phone_number: service.customer?.phone_number || undefined,
+      },
+      service_type: service.service_type,
+      active: service.active,
+      requires_payment: service.requires_payment,
+      applied_at: service.applied_at,
+      kyc_info: service.kyc
+        ? {
+            kyc_id: service.kyc.id,
+            kyc_level: service.kyc.kyc_level,
+            kyc_status: service.kyc.status,
+            reviewed_at: service.kyc.reviewed_at,
+          }
+        : undefined,
+    }));
+
+    return PaginationUtil.createPaginatedResult(data, total, { page, limit });
+  }
+
+  /**
+   * Get pending applications for Guaranteed Returns
+   */
+  async getPendingGuaranteedReturns(
+    options: PaginationOptions = {},
+  ): Promise<PaginatedResult<any>> {
+    const { page, limit, skip } = PaginationUtil.calculatePagination({
+      page: options.page,
+      limit: options.limit,
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
+
+    const qb = this.customerServiceRepo
+      .createQueryBuilder('s')
+      .leftJoinAndSelect('s.customer', 'c')
+      .leftJoinAndSelect('s.kyc', 'k')
+      .leftJoin('payments', 'p', 'p.service_id = s.id')
+      .addSelect(['p.id', 'p.amount', 'p.status', 'p.paid_at'])
+      .where('s.service_type = :stype', {
+        stype: CustomerServiceType.GUARANTEED_RETURNS,
+      })
+      .andWhere('s.active = :active', { active: false })
+      .orderBy('s.applied_at', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [services, total] = await qb.getManyAndCount();
+
+    const data = await Promise.all(
+      services.map(async (service) => {
+        // Get payment info
+        const payments = await this.paymentRepo.find({
+          where: { service_id: service.id },
+          order: { created_at: 'DESC' },
+          take: 1,
+        });
+        const latestPayment = payments[0];
+
+        return {
+          service_id: service.id,
+          customer_id: service.customer_id,
+          customer_info: {
+            username: service.customer?.username || '',
+            email: service.customer?.email || '',
+            first_name: service.customer?.first_name || '',
+            last_name: service.customer?.last_name || '',
+            phone_number: service.customer?.phone_number || undefined,
+          },
+          service_type: service.service_type,
+          active: service.active,
+          requires_payment: service.requires_payment,
+          invested_amount: service.invested_amount,
+          balance: service.balance,
+          applied_at: service.applied_at,
+          kyc_info: service.kyc
+            ? {
+                kyc_id: service.kyc.id,
+                kyc_level: service.kyc.kyc_level,
+                kyc_status: service.kyc.status,
+                reviewed_at: service.kyc.reviewed_at,
+              }
+            : undefined,
+          payment_info: latestPayment
+            ? {
+                payment_id: latestPayment.id,
+                amount: latestPayment.amount,
+                paid_at: latestPayment.paid_at,
+                status: latestPayment.status,
+                payment_slip_url: latestPayment.payment_slip_url || undefined,
+              }
+            : undefined,
+        };
+      }),
+    );
+
+    return PaginationUtil.createPaginatedResult(data, total, { page, limit });
+  }
+
+  /**
+   * Get all pending service applications with filters
+   */
+  async getAllPendingServices(
+    serviceType?: CustomerServiceType,
+    options: PaginationOptions = {},
+  ): Promise<PaginatedResult<any>> {
+    const { page, limit, skip } = PaginationUtil.calculatePagination({
+      page: options.page,
+      limit: options.limit,
+      defaultLimit: 20,
+      maxLimit: 100,
+    });
+
+    const qb = this.customerServiceRepo
+      .createQueryBuilder('s')
+      .leftJoinAndSelect('s.customer', 'c')
+      .leftJoinAndSelect('s.kyc', 'k')
+      .where('s.active = :active', { active: false })
+      .orderBy('s.applied_at', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    if (serviceType) {
+      qb.andWhere('s.service_type = :stype', { stype: serviceType });
+    }
+
+    const [services, total] = await qb.getManyAndCount();
+
+    const data = await Promise.all(
+      services.map(async (service) => {
+        // Get payment info if service requires payment
+        let paymentInfo;
+        if (service.requires_payment) {
+          const payments = await this.paymentRepo.find({
+            where: { service_id: service.id },
+            order: { created_at: 'DESC' },
+            take: 1,
+          });
+          const latestPayment = payments[0];
+          if (latestPayment) {
+            paymentInfo = {
+              payment_id: latestPayment.id,
+              amount: latestPayment.amount,
+              paid_at: latestPayment.paid_at,
+              status: latestPayment.status,
+              payment_slip_url: latestPayment.payment_slip_url || undefined,
+            };
+          }
+        }
+
+        return {
+          service_id: service.id,
+          customer_id: service.customer_id,
+          customer_info: {
+            username: service.customer?.username || '',
+            email: service.customer?.email || '',
+            first_name: service.customer?.first_name || '',
+            last_name: service.customer?.last_name || '',
+            phone_number: service.customer?.phone_number || undefined,
+          },
+          service_type: service.service_type,
+          active: service.active,
+          requires_payment: service.requires_payment,
+          subscription_duration: service.subscription_duration,
+          subscription_fee: service.subscription_fee,
+          subscription_expires_at: service.subscription_expires_at,
+          invested_amount: service.invested_amount,
+          balance: service.balance,
+          applied_at: service.applied_at,
+          kyc_info: service.kyc
+            ? {
+                kyc_id: service.kyc.id,
+                kyc_level: service.kyc.kyc_level,
+                kyc_status: service.kyc.status,
+                reviewed_at: service.kyc.reviewed_at,
+              }
+            : undefined,
+          payment_info: paymentInfo,
+        };
+      }),
+    );
+
+    return PaginationUtil.createPaginatedResult(data, total, { page, limit });
+  }
+
+  /**
+   * Get service application statistics
+   */
+  async getServiceStats(): Promise<any> {
+    const serviceTypes = Object.values(CustomerServiceType);
+
+    const statsByService = await Promise.all(
+      serviceTypes.map(async (serviceType) => {
+        // Count pending
+        const totalPending = await this.customerServiceRepo.count({
+          where: { service_type: serviceType, active: false },
+        });
+
+        // Count pending with payment
+        const pendingWithPayment = await this.customerServiceRepo
+          .createQueryBuilder('s')
+          .leftJoin('payments', 'p', 'p.service_id = s.id')
+          .where('s.service_type = :stype', { stype: serviceType })
+          .andWhere('s.active = false')
+          .andWhere('p.status IN (:...statuses)', {
+            statuses: [
+              PaymentStatus.SUCCEEDED,
+              PaymentStatus.PAYMENT_SLIP_SUBMITTED,
+            ],
+          })
+          .getCount();
+
+        // Count pending KYC
+        const pendingKyc = await this.customerServiceRepo
+          .createQueryBuilder('s')
+          .leftJoin('customer_kyc', 'k', 'k.id = s.kyc_id')
+          .where('s.service_type = :stype', { stype: serviceType })
+          .andWhere('s.active = false')
+          .andWhere('k.status = :kycStatus', { kycStatus: KycStatus.PENDING })
+          .getCount();
+
+        // Count approved this month
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        startOfMonth.setHours(0, 0, 0, 0);
+
+        const approvedThisMonth = await this.customerServiceRepo.count({
+          where: {
+            service_type: serviceType,
+            active: true,
+            applied_at: MoreThan(startOfMonth),
+          },
+        });
+
+        return {
+          service_type: serviceType,
+          total_pending: totalPending,
+          pending_with_payment: pendingWithPayment,
+          pending_kyc_review: pendingKyc,
+          approved_this_month: approvedThisMonth,
+          rejected_this_month: 0, // Would need rejection tracking
+          avg_approval_time_hours: null, // Would need approval timestamp tracking
+        };
+      }),
+    );
+
+    const totalPending = statsByService.reduce(
+      (sum, stat) => sum + stat.total_pending,
+      0,
+    );
+    const totalActive = await this.customerServiceRepo.count({
+      where: { active: true },
+    });
+
+    return {
+      by_service: statsByService,
+      total_pending: totalPending,
+      total_active: totalActive,
+    };
   }
 }

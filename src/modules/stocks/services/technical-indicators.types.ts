@@ -331,3 +331,50 @@ export interface StockNewsResponse {
     message?: string;
   };
 }
+
+export type SECFilingType =
+  | '10-K' // Annual report
+  | '10-Q' // Quarterly report
+  | '8-K' // Current report
+  | '4' // Insider trading
+  | 'DEF 14A' // Proxy statement
+  | 'S-1' // IPO registration
+  | '6-K' // Foreign issuer report
+  | 'TRANSCRIPT' // Earnings call transcript
+  | 'PRESS_RELEASE'; // Press releases
+
+export interface CompanyDocument {
+  id: string;
+  type: SECFilingType | string;
+  title: string;
+  description?: string | null;
+  filingDate: string;
+  periodDate?: string | null;
+  fiscalYear?: string | null;
+  fiscalQuarter?: string | null;
+  url?: string | null;
+  fileUrl?: string | null;
+  acceptanceDateTime?: string | null;
+  cik?: string | null;
+  size?: number | null;
+  tags?: string[];
+}
+
+export interface CompanyDocumentsResponse {
+  symbol: string;
+  companyName?: string | null;
+  cik?: string | null;
+  documents: CompanyDocument[];
+  filteredBy: {
+    type?: SECFilingType | string;
+    year?: number;
+    limit?: number;
+  };
+  metadata: {
+    provider: 'polygon' | 'sec' | 'google-script';
+    total: number;
+    hasMore: boolean;
+    fetchedAt: Date;
+    message?: string;
+  };
+}

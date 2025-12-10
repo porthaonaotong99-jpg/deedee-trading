@@ -25,6 +25,8 @@ import {
   SupportLevelsSnapshot,
   USMarketRsiBucketResponse,
   USMarketRsiBucketStock,
+  CompanyDocumentsResponse,
+  CompanyDocument,
 } from './technical-indicators.types';
 import { StockMetadataService } from './stock-metadata.service';
 
@@ -132,6 +134,7 @@ export class TechnicalIndicatorsService {
   private readonly logger = new Logger(TechnicalIndicatorsService.name);
   private readonly alphaVantageApiKey = process.env.ALPHA_VANTAGE_KEY;
   private readonly polygonApiKey = process.env.POLYGON_API_KEY;
+
   private readonly allowedUsExchanges = new Set<string>([
     'NASDAQ',
     'NYSE',
@@ -903,6 +906,14 @@ export class TechnicalIndicatorsService {
     from: number,
     to: number,
   ): Promise<StockPricePoint[] | null> {
+    console.log(
+      'Fetching Polygon aggregates for',
+      symbol,
+      resolution,
+      from,
+      to,
+      this.polygonApiKey,
+    );
     if (!this.polygonApiKey) {
       return null;
     }
@@ -1886,6 +1897,359 @@ export class TechnicalIndicatorsService {
       items,
       metadata,
     };
+  }
+
+  async getCompanyDocuments(
+    symbol: string,
+    options?: {
+      type?: string;
+      limit?: number;
+      order?: 'asc' | 'desc';
+    },
+  ): Promise<CompanyDocumentsResponse> {
+    const upper = symbol.toUpperCase();
+    const limit = options?.limit ?? 50;
+    const order = options?.order ?? 'desc';
+    const type = options?.type?.toUpperCase();
+
+    const response: CompanyDocumentsResponse = {
+      symbol: upper,
+      companyName: null,
+      cik: null,
+      documents: [],
+      filteredBy: {
+        type: type,
+        limit: limit,
+      },
+      metadata: {
+        provider: 'polygon',
+        total: 0,
+        hasMore: false,
+        fetchedAt: new Date(),
+      },
+    };
+
+    // Try Polygon first (if available), then fallback to SEC.gov
+    if (this.polygonApiKey) {
+      const polygonResult = await this.fetchPolygonFilings(
+        upper,
+        type,
+        limit,
+        order,
+      );
+      if (polygonResult.success && polygonResult.data) {
+        return polygonResult.data;
+      }
+      this.logger.debug(
+        `Polygon filings not available (${polygonResult.error}), falling back to SEC.gov`,
+      );
+    }
+
+    // Fallback to SEC.gov EDGAR API (free, no API key needed)
+    return this.fetchSECFilings(upper, type, limit, order, response);
+  }
+
+  private async fetchPolygonFilings(
+    symbol: string,
+    type: string | undefined,
+    limit: number,
+    order: string,
+  ): Promise<{
+    success: boolean;
+    data?: CompanyDocumentsResponse;
+    error?: string;
+  }> {
+    if (!this.polygonApiKey) {
+      return { success: false, error: 'No API key' };
+    }
+
+    const params = new URLSearchParams({
+      ticker: symbol,
+      limit: Math.min(limit, 100).toString(),
+      order,
+    });
+
+    if (type) {
+      params.append('filing_type', type);
+    }
+
+    const url = `https://api.polygon.io/vX/reference/filings?${params.toString()}&apiKey=${this.polygonApiKey}`;
+
+    try {
+      const apiResponse = await fetch(url);
+      if (!apiResponse.ok) {
+        return {
+          success: false,
+          error: `HTTP ${apiResponse.status}`,
+        };
+      }
+
+      const payload = (await apiResponse.json()) as {
+        results?: Array<{
+          id?: string;
+          filing_date?: string;
+          filing_type?: string;
+          report_url?: string;
+          filing_url?: string;
+          acceptance_datetime?: string;
+          period_of_report_date?: string;
+          cik?: string;
+          company_name?: string;
+          fiscal_year?: string;
+          fiscal_quarter?: string;
+          form_type?: string;
+        }>;
+        count?: number;
+        next_url?: string;
+        status?: string;
+      };
+
+      if (!payload.results || payload.results.length === 0) {
+        return { success: false, error: 'No results' };
+      }
+
+      const response: CompanyDocumentsResponse = {
+        symbol: symbol,
+        companyName: payload.results[0]?.company_name || null,
+        cik: payload.results[0]?.cik || null,
+        documents: payload.results.map((filing) => {
+          const filingType =
+            filing.filing_type || filing.form_type || 'UNKNOWN';
+          return {
+            id: filing.id || `${symbol}-${filing.filing_date}-${filingType}`,
+            type: filingType,
+            title: this.generateDocumentTitle(
+              filingType,
+              filing.fiscal_year,
+              filing.fiscal_quarter,
+              filing.period_of_report_date,
+            ),
+            description: `${filingType} filing for ${filing.company_name || symbol}`,
+            filingDate: filing.filing_date || '',
+            periodDate: filing.period_of_report_date || null,
+            fiscalYear: filing.fiscal_year || null,
+            fiscalQuarter: filing.fiscal_quarter || null,
+            url: filing.report_url || filing.filing_url || null,
+            fileUrl: filing.filing_url || null,
+            acceptanceDateTime: filing.acceptance_datetime || null,
+            cik: filing.cik || null,
+            tags: this.generateDocumentTags(filingType, filing.fiscal_quarter),
+          };
+        }),
+        filteredBy: { type, limit },
+        metadata: {
+          provider: 'polygon',
+          total: payload.count || 0,
+          hasMore: !!payload.next_url,
+          fetchedAt: new Date(),
+        },
+      };
+
+      return { success: true, data: response };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  private async fetchSECFilings(
+    symbol: string,
+    type: string | undefined,
+    limit: number,
+    order: string,
+    baseResponse: CompanyDocumentsResponse,
+  ): Promise<CompanyDocumentsResponse> {
+    const response = { ...baseResponse };
+    response.metadata.provider = 'sec';
+
+    try {
+      // First, get CIK number from SEC company tickers
+      const tickersUrl = 'https://www.sec.gov/files/company_tickers.json';
+      const tickersResponse = await fetch(tickersUrl, {
+        headers: {
+          'User-Agent': 'DeeDee Trading Platform support@deedeetrading.com',
+        },
+      });
+
+      if (!tickersResponse.ok) {
+        response.metadata.message = `SEC API unavailable: ${tickersResponse.status}`;
+        return response;
+      }
+
+      const tickers = (await tickersResponse.json()) as Record<
+        string,
+        { cik_str: number; ticker: string; title: string }
+      >;
+
+      // Find the company by ticker
+      const company = Object.values(tickers).find(
+        (t) => t.ticker.toUpperCase() === symbol,
+      );
+
+      if (!company) {
+        response.metadata.message = `Company ${symbol} not found in SEC database`;
+        return response;
+      }
+
+      const cik = company.cik_str.toString().padStart(10, '0');
+      response.companyName = company.title;
+      response.cik = cik;
+
+      // Get recent filings
+      const submissionsUrl = `https://data.sec.gov/submissions/CIK${cik}.json`;
+      const submissionsResponse = await fetch(submissionsUrl, {
+        headers: {
+          'User-Agent': 'DeeDee Trading Platform support@deedeetrading.com',
+        },
+      });
+
+      if (!submissionsResponse.ok) {
+        response.metadata.message = `Failed to fetch SEC submissions: ${submissionsResponse.status}`;
+        return response;
+      }
+
+      const submissions = (await submissionsResponse.json()) as {
+        name?: string;
+        cik?: string;
+        filings?: {
+          recent?: {
+            accessionNumber?: string[];
+            filingDate?: string[];
+            reportDate?: string[];
+            acceptanceDateTime?: string[];
+            form?: string[];
+            primaryDocument?: string[];
+            primaryDocDescription?: string[];
+          };
+        };
+      };
+
+      const recent = submissions.filings?.recent;
+      if (!recent || !recent.form || recent.form.length === 0) {
+        response.metadata.message = `No SEC filings found for ${symbol}`;
+        return response;
+      }
+
+      // Filter by type if specified
+      const documents: CompanyDocument[] = [];
+      for (let i = 0; i < recent.form.length; i++) {
+        const formType = recent.form[i];
+        if (type && formType !== type) continue;
+
+        const accessionNumber =
+          recent.accessionNumber?.[i]?.replace(/-/g, '') || '';
+        const accessionNumberWithDashes = recent.accessionNumber?.[i] || '';
+        const filingDate = recent.filingDate?.[i] || '';
+        const reportDate = recent.reportDate?.[i];
+        const primaryDoc = recent.primaryDocument?.[i];
+
+        // Generate better URLs similar to TradingView
+        // Use SEC's filing detail page which shows all documents in a filing
+        const filingDetailUrl = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik}&type=${formType}&dateb=${filingDate}&owner=exclude&count=10&search_text=`;
+
+        // Direct document URL (if primary document exists)
+        const directDocUrl =
+          primaryDoc && accessionNumber
+            ? `https://www.sec.gov/cgi-bin/viewer?action=view&cik=${cik}&accession_number=${accessionNumberWithDashes}&xbrl_type=v`
+            : null;
+
+        documents.push({
+          id: accessionNumber,
+          type: formType || 'UNKNOWN',
+          title: this.generateDocumentTitle(
+            formType || '',
+            filingDate
+              ? new Date(filingDate).getFullYear().toString()
+              : undefined,
+            undefined,
+            reportDate,
+          ),
+          description: `${formType} filing for ${company.title}`,
+          filingDate: filingDate,
+          periodDate: reportDate || null,
+          fiscalYear: filingDate
+            ? new Date(filingDate).getFullYear().toString()
+            : null,
+          fiscalQuarter: null,
+          url: directDocUrl || filingDetailUrl,
+          fileUrl: primaryDoc
+            ? `https://www.sec.gov/Archives/edgar/data/${company.cik_str}/${accessionNumber}/${primaryDoc}`
+            : null,
+          acceptanceDateTime: recent.acceptanceDateTime?.[i] || null,
+          cik: cik,
+          tags: this.generateDocumentTags(formType || '', undefined),
+        });
+
+        if (documents.length >= limit) break;
+      }
+
+      // Sort by date
+      if (order === 'asc') {
+        documents.sort(
+          (a, b) =>
+            new Date(a.filingDate).getTime() - new Date(b.filingDate).getTime(),
+        );
+      } else {
+        documents.sort(
+          (a, b) =>
+            new Date(b.filingDate).getTime() - new Date(a.filingDate).getTime(),
+        );
+      }
+
+      response.documents = documents;
+      response.metadata.total = documents.length;
+      response.metadata.hasMore = recent.form.length > limit;
+
+      return response;
+    } catch (error) {
+      response.metadata.message = `Error fetching SEC filings: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      this.logger.error(response.metadata.message, error);
+      return response;
+    }
+  }
+
+  private generateDocumentTitle(
+    type: string,
+    fiscalYear?: string,
+    fiscalQuarter?: string,
+    periodDate?: string,
+  ): string {
+    const year =
+      fiscalYear ||
+      (periodDate ? new Date(periodDate).getFullYear().toString() : '');
+    const quarter = fiscalQuarter ? `Q${fiscalQuarter}` : '';
+
+    switch (type) {
+      case '10-K':
+        return `Annual Report ${year}`;
+      case '10-Q':
+        return `Quarterly Report ${quarter} ${year}`.trim();
+      case '8-K':
+        return `Current Report ${year}`;
+      case 'DEF 14A':
+        return `Proxy Statement ${year}`;
+      case '4':
+        return `Insider Trading Statement ${year}`;
+      case 'S-1':
+        return 'IPO Registration Statement';
+      default:
+        return `${type} Filing ${year}`.trim();
+    }
+  }
+
+  private generateDocumentTags(type: string, quarter?: string): string[] {
+    const tags: string[] = [];
+
+    if (type === '10-K') tags.push('Annual', 'Financial Statement');
+    if (type === '10-Q') tags.push('Quarterly', 'Financial Statement');
+    if (type === '8-K') tags.push('Current Event', 'Material Event');
+    if (type === 'DEF 14A') tags.push('Proxy', 'Shareholder Meeting');
+    if (type === '4') tags.push('Insider Trading', 'Form 4');
+    if (quarter) tags.push(`Q${quarter}`);
+
+    return tags;
   }
 
   async getAlphaVantageRSI(

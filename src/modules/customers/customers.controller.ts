@@ -12,6 +12,7 @@ import {
   ParseUUIDPipe,
   ForbiddenException,
   Req,
+  Put,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -20,9 +21,11 @@ import {
   ApiQuery,
   ApiTags,
   ApiResponse,
+  ApiParam,
 } from '@nestjs/swagger';
 import { CustomersService } from './customers.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtUserAuthGuard } from '../auth/guards/jwt-user.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -51,6 +54,10 @@ class UpdateCustomerDto {
   username?: string;
   email?: string;
   password?: string;
+}
+
+class UpdateCustomerStatusDto {
+  status!: 'active' | 'inactive' | 'ban' | 'deleted';
 }
 
 @ApiTags('customers')
@@ -135,6 +142,102 @@ export class CustomersController {
   async remove(@Param('id', ParseUUIDPipe) id: string) {
     await this.service.remove(id);
     return handleSuccessOne({ data: null, message: 'Customer deleted' });
+  }
+
+  // --- Admin Customer Status Management Endpoints ---
+
+  @Put(':id/status')
+  @UseGuards(JwtUserAuthGuard, PermissionsGuard)
+  @Permissions('customers:update')
+  @ApiOperation({ summary: 'Update customer status (admin)' })
+  @ApiParam({ name: 'id', description: 'Customer ID' })
+  @ApiBody({ type: UpdateCustomerStatusDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Customer status updated successfully',
+  })
+  async updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(ValidationPipe) dto: UpdateCustomerStatusDto,
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can update customer status');
+    }
+    const data = await this.service.updateStatus(id, dto.status);
+    return handleSuccessOne({
+      data,
+      message: 'Customer status updated successfully',
+    });
+  }
+
+  @Put(':id/ban')
+  @UseGuards(JwtUserAuthGuard, PermissionsGuard)
+  @Permissions('customers:update')
+  @ApiOperation({ summary: 'Ban customer (admin)' })
+  @ApiParam({ name: 'id', description: 'Customer ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Customer banned successfully',
+  })
+  async banCustomer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can ban customers');
+    }
+    const data = await this.service.updateStatus(id, 'ban');
+    return handleSuccessOne({
+      data,
+      message: 'Customer banned successfully',
+    });
+  }
+
+  @Put(':id/activate')
+  @UseGuards(JwtUserAuthGuard, PermissionsGuard)
+  @Permissions('customers:update')
+  @ApiOperation({ summary: 'Activate customer (admin)' })
+  @ApiParam({ name: 'id', description: 'Customer ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Customer activated successfully',
+  })
+  async activateCustomer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can activate customers');
+    }
+    const data = await this.service.updateStatus(id, 'active');
+    return handleSuccessOne({
+      data,
+      message: 'Customer activated successfully',
+    });
+  }
+
+  @Put(':id/deactivate')
+  @UseGuards(JwtUserAuthGuard, PermissionsGuard)
+  @Permissions('customers:update')
+  @ApiOperation({ summary: 'Deactivate customer (admin)' })
+  @ApiParam({ name: 'id', description: 'Customer ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Customer deactivated successfully',
+  })
+  async deactivateCustomer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can deactivate customers');
+    }
+    const data = await this.service.updateStatus(id, 'inactive');
+    return handleSuccessOne({
+      data,
+      message: 'Customer deactivated successfully',
+    });
   }
 
   // --- Password Reset Endpoints ---

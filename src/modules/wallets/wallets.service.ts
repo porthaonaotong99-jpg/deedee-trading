@@ -151,6 +151,63 @@ export class WalletsService {
     return this.transferRepo.save(transfer);
   }
 
+  // --- Admin: List pending topups ---
+  async listPendingTopups(query: PaginationQueryDto) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit =
+      query.limit && query.limit > 0 ? Math.min(query.limit, 100) : 10;
+
+    const [data, total] = await this.transferRepo.findAndCount({
+      where: {
+        identify: TransferIdentify.RECHARGE,
+        status: TransferStatus.PENDING,
+      },
+      relations: ['customer'],
+      take: limit,
+      skip: (page - 1) * limit,
+      order: { created_at: 'DESC' },
+    });
+
+    const totalPages = Math.ceil(total / limit) || 1;
+    return { data, total, page, limit, totalPages };
+  }
+
+  // --- Admin: List all topups with filters ---
+  async listAllTopups(
+    query: PaginationQueryDto,
+    filters?: { status?: TransferStatus; startDate?: Date; endDate?: Date },
+  ) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit =
+      query.limit && query.limit > 0 ? Math.min(query.limit, 100) : 10;
+
+    const qb = this.transferRepo
+      .createQueryBuilder('t')
+      .leftJoinAndSelect('t.customer', 'customer')
+      .where('t.identify = :identify', { identify: TransferIdentify.RECHARGE });
+
+    if (filters?.status) {
+      qb.andWhere('t.status = :status', { status: filters.status });
+    }
+
+    if (filters?.startDate) {
+      qb.andWhere('t.created_at >= :startDate', { startDate: filters.startDate });
+    }
+
+    if (filters?.endDate) {
+      qb.andWhere('t.created_at <= :endDate', { endDate: filters.endDate });
+    }
+
+    const [data, total] = await qb
+      .orderBy('t.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    const totalPages = Math.ceil(total / limit) || 1;
+    return { data, total, page, limit, totalPages };
+  }
+
   // Investment request logic moved to InvestmentInfoService (investGuaranteedReturns removed)
 
   async remove(id: string) {

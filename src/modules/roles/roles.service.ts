@@ -1,7 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Role } from './entities/role.entity';
+import { RolePermission } from './entities/role-permission.entity';
+import { Permission } from '../permissions/entities/permission.entity';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 interface CreateRoleDto {
@@ -15,6 +17,10 @@ interface UpdateRoleDto {
 export class RolesService {
   constructor(
     @InjectRepository(Role) private readonly repo: Repository<Role>,
+    @InjectRepository(RolePermission)
+    private readonly rolePermissionRepo: Repository<RolePermission>,
+    @InjectRepository(Permission)
+    private readonly permissionRepo: Repository<Permission>,
   ) {}
 
   async create(dto: CreateRoleDto) {
@@ -50,5 +56,116 @@ export class RolesService {
   async remove(id: string) {
     const entity = await this.findOne(id);
     await this.repo.remove(entity);
+  }
+
+  // Role-Permission Management
+
+  async findOneWithPermissions(id: string) {
+    const role = await this.repo.findOne({
+      where: { id },
+      relations: ['rolePermissions', 'rolePermissions.permission'],
+    });
+    if (!role) throw new NotFoundException('Role not found');
+    return role;
+  }
+
+  async getPermissions(roleId: string) {
+    const role = await this.findOneWithPermissions(roleId);
+    return role.rolePermissions
+      .filter((rp) => rp.permission)
+      .map((rp) => ({
+        id: rp.id,
+        permission_id: rp.permission_id,
+        permission_name: rp.permission?.name,
+        permission_description: rp.permission?.description,
+        created_at: rp.created_at,
+      }));
+  }
+
+  async assignPermission(roleId: string, permissionId: string) {
+    // Verify role exists
+    const role = await this.findOne(roleId);
+
+    // Verify permission exists
+    const permission = await this.permissionRepo.findOne({
+      where: { id: permissionId },
+    });
+    if (!permission) {
+      throw new NotFoundException('Permission not found');
+    }
+
+    // Check if already assigned
+    const existing = await this.rolePermissionRepo.findOne({
+      where: { role_id: roleId, permission_id: permissionId },
+    });
+    if (existing) {
+      throw new BadRequestException('Permission already assigned to this role');
+    }
+
+    // Create the role-permission assignment
+    const rolePermission = this.rolePermissionRepo.create({
+      role_id: roleId,
+      permission_id: permissionId,
+      name: `${role.name}_${permission.name}`,
+    });
+
+    return this.rolePermissionRepo.save(rolePermission);
+  }
+
+  async removePermission(roleId: string, permissionId: string) {
+    // Verify role exists
+    await this.findOne(roleId);
+
+    const rolePermission = await this.rolePermissionRepo.findOne({
+      where: { role_id: roleId, permission_id: permissionId },
+    });
+
+    if (!rolePermission) {
+      throw new NotFoundException('Permission not assigned to this role');
+    }
+
+    await this.rolePermissionRepo.remove(rolePermission);
+  }
+
+  async assignMultiplePermissions(roleId: string, permissionIds: string[]) {
+    // Verify role exists
+    const role = await this.findOne(roleId);
+
+    const results: { permissionId: string; success: boolean; result?: RolePermission; error?: string }[] = [];
+    for (const permissionId of permissionIds) {
+      try {
+        const result = await this.assignPermission(roleId, permissionId);
+        results.push({ permissionId, success: true, result });
+      } catch (error) {
+        results.push({
+          permissionId,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    return results;
+  }
+
+  async removeMultiplePermissions(roleId: string, permissionIds: string[]) {
+    // Verify role exists
+    await this.findOne(roleId);
+
+    const results: { permissionId: string; success: boolean; error?: string }[] = [];
+    for (const permissionId of permissionIds) {
+      try {
+        await this.removePermission(roleId, permissionId);
+        results.push({ permissionId, success: true });
+      } catch (error) {
+        results.push({
+          permissionId,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    return results;
   }
 }

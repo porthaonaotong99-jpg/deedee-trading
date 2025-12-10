@@ -856,4 +856,179 @@ export class CustomerServicesController {
       message: 'Payment rejected successfully',
     });
   }
+
+  @Get('admin/international-stock-account/pending')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiOperation({
+    summary: 'List pending International Stock Account applications (admin)',
+    description:
+      'List of international stock account applications awaiting KYC/admin approval.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (1-based, default 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size (default 20, max 100)',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Pending international stock account applications retrieved',
+  })
+  async getPendingInternationalStockAccounts(
+    @AuthUser() user: JwtPayload,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException(
+        'Only admins can view pending applications',
+      );
+    }
+    const result =
+      await this.customersService.getPendingInternationalStockAccounts({
+        page: page ? parseInt(page, 10) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+      });
+    return handleSuccessPaginated({
+      data: result.data,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      message: 'Pending international stock account applications retrieved',
+    });
+  }
+
+  @Get('admin/guaranteed-returns/pending')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiOperation({
+    summary: 'List pending Guaranteed Returns applications (admin)',
+    description:
+      'List of guaranteed returns applications awaiting KYC/payment/admin approval.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (1-based, default 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size (default 20, max 100)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Pending guaranteed returns applications retrieved',
+  })
+  async getPendingGuaranteedReturns(
+    @AuthUser() user: JwtPayload,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException(
+        'Only admins can view pending applications',
+      );
+    }
+    const result = await this.customersService.getPendingGuaranteedReturns({
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+    return handleSuccessPaginated({
+      data: result.data,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      message: 'Pending guaranteed returns applications retrieved',
+    });
+  }
+
+  @Get('admin/all-services/pending')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiOperation({
+    summary: 'List all pending service applications (admin)',
+    description:
+      'List of all service applications awaiting approval, with optional filtering by service type.',
+  })
+  @ApiQuery({
+    name: 'service_type',
+    required: false,
+    enum: CustomerServiceType,
+    description: 'Filter by service type',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (1-based, default 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size (default 20, max 100)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Pending service applications retrieved',
+  })
+  async getAllPendingServices(
+    @AuthUser() user: JwtPayload,
+    @Query('service_type') serviceType?: CustomerServiceType,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException(
+        'Only admins can view pending applications',
+      );
+    }
+    const result = await this.customersService.getAllPendingServices(
+      serviceType,
+      {
+        page: page ? parseInt(page, 10) : undefined,
+        limit: limit ? parseInt(limit, 10) : undefined,
+      },
+    );
+    return handleSuccessPaginated({
+      data: result.data,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      message: 'Pending service applications retrieved',
+    });
+  }
+
+  @Get('admin/stats')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiOperation({
+    summary: 'Get service application statistics (admin)',
+    description:
+      'Get statistics for all service types including pending, approved counts.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Service statistics retrieved',
+  })
+  async getServiceStats(@AuthUser() user: JwtPayload) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can view statistics');
+    }
+    const data = await this.customersService.getServiceStats();
+    return handleSuccessOne({
+      data,
+      message: 'Service statistics retrieved',
+    });
+  }
 }

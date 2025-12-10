@@ -9,6 +9,20 @@ import { CustomerServiceType } from '../../modules/customers/entities/customer-s
 import { CustomersService } from '../../modules/customers/customers.service';
 import { REQUIRED_SERVICE_TYPE } from '../decorators/requires-service.decorator';
 
+type MinimalCustomerService = {
+  service_type: CustomerServiceType;
+  active?: boolean | null;
+  subscription_expires_at?: Date | string | null;
+};
+
+const SERVICE_LABELS: Record<CustomerServiceType, string> = {
+  [CustomerServiceType.PREMIUM_MEMBERSHIP]: 'Premium membership',
+  [CustomerServiceType.PREMIUM_STOCK_PICKS]: 'Premium stock picks',
+  [CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT]:
+    'International stock account',
+  [CustomerServiceType.GUARANTEED_RETURNS]: 'Guaranteed returns',
+};
+
 @Injectable()
 export class RequiredServiceGuard implements CanActivate {
   constructor(
@@ -33,13 +47,25 @@ export class RequiredServiceGuard implements CanActivate {
 
     const services = (await this.customersService.listServices(
       user.sub,
-    )) as Array<{ service_type: CustomerServiceType; active?: boolean }>; // minimal shape
+    )) as MinimalCustomerService[];
+    const now = new Date();
+
+    console.log({ services });
+
     const ok = Array.isArray(services)
-      ? services.some((s) => s.service_type === required && s.active === true)
+      ? services.some((service) => {
+          if (service.service_type !== required) return false;
+          if (!service.active) return false;
+
+          if (!service.subscription_expires_at) return true;
+          const expires = new Date(service.subscription_expires_at);
+          return Number.isFinite(expires.getTime()) && expires > now;
+        })
       : false;
     if (!ok) {
+      const label = SERVICE_LABELS[required] ?? 'Required customer service';
       throw new ForbiddenException(
-        'Required customer service not active. Please apply and get approved.',
+        `${label} is inactive, expired, or missing. Please apply, renew, or complete payment to regain access.`,
       );
     }
     return true;

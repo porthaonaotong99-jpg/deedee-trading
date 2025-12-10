@@ -6,8 +6,15 @@ import {
   Get,
   Param,
   Req,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBody,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import {
   AuthCustomerRegisterRequestExample,
   AuthCustomerRegisterResponseExample,
@@ -27,6 +34,7 @@ import {
   IOneResponse,
 } from '../../common/utils/response.util';
 import { RefreshTokenDto } from './dto/session.dto';
+import { JwtUserAuthGuard } from './guards/jwt-user.guard';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -224,6 +232,75 @@ export class AuthController {
     return handleSuccessOne({
       data,
       message: 'All sessions revoked',
+      statusCode: 200,
+    });
+  }
+
+  @Get('verify-token')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Verify admin/user token validity' })
+  @ApiResponse({
+    status: 200,
+    description: 'Token is valid',
+    schema: {
+      example: {
+        is_error: false,
+        code: 'SUCCESS',
+        message: 'Token is valid',
+        data: {
+          valid: true,
+          user: {
+            id: 'user-id',
+            username: 'admin',
+            roleId: 'role-id',
+          },
+        },
+        status_code: 200,
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Token is invalid or expired',
+  })
+  verifyToken(
+    @Req()
+    req: {
+      user?: { sub: string; username: string; roleId: string; type: string };
+    },
+  ) {
+    const user = req.user;
+    return handleSuccessOne({
+      data: {
+        valid: true,
+        user: {
+          id: user?.sub || '',
+          username: user?.username || '',
+          roleId: user?.roleId || '',
+          type: user?.type || '',
+        },
+      },
+      message: 'Token is valid',
+      statusCode: 200,
+    });
+  }
+
+  @Post('logout')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Logout admin/user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Logout successful',
+  })
+  logout() {
+    // For stateless JWT, we just return success
+    // The frontend will clear the token
+    // If you need to blacklist tokens, implement it in the service
+    return handleSuccessOne({
+      data: { success: true },
+      message: 'Logout successful',
       statusCode: 200,
     });
   }

@@ -7,6 +7,7 @@ import {
   UseGuards,
   ValidationPipe,
   ForbiddenException,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -14,17 +15,23 @@ import {
   ApiOperation,
   ApiTags,
   ApiParam,
+  ApiQuery,
+  ApiResponse,
 } from '@nestjs/swagger';
 import { WalletsService } from './wallets.service';
 import { CustomersService } from '../customers/customers.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtUserAuthGuard } from '../auth/guards/jwt-user.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
-import { handleSuccessOne } from '../../common/utils/response.util';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { handleSuccessOne, handleSuccessPaginated } from '../../common/utils/response.util';
 import { AuthUser } from '../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../common/interfaces';
 import { CustomerServiceType } from '../customers/entities/customer-service.entity';
 import { RequiresService } from '../../common/decorators/requires-service.decorator';
 import { RequiredServiceGuard } from '../../common/guards/required-service.guard';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { TransferStatus } from '../../common/enums';
 
 class RequestTopupDto {
   amount!: number;
@@ -191,5 +198,94 @@ export class WalletsController {
       reason: body.reason,
     });
     return handleSuccessOne({ data: transfer, message: 'Topup rejected' });
+  }
+
+  // --- Admin Endpoints ---
+
+  @Get('admin/pending-topups')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiOperation({ summary: 'List pending wallet topup requests (admin)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({
+    status: 200,
+    description: 'Pending topups retrieved successfully',
+  })
+  async listPendingTopups(
+    @Query() query: PaginationQueryDto,
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can view pending topups');
+    }
+
+    const result = await this.service.listPendingTopups(query);
+    return handleSuccessPaginated({
+      data: result.data,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      message: 'Pending topups retrieved successfully',
+    });
+  }
+
+  @Get('admin/topups')
+  @UseGuards(JwtUserAuthGuard, PermissionsGuard)
+  @Permissions('wallets:read')
+  @ApiOperation({ summary: 'List all wallet topup requests with filters (admin)' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'status', required: false, enum: ['pending', 'approved', 'rejected'] })
+  @ApiQuery({ name: 'start_date', required: false, description: 'Start date filter (ISO format)' })
+  @ApiQuery({ name: 'end_date', required: false, description: 'End date filter (ISO format)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Topups retrieved successfully',
+  })
+  async listAllTopups(
+    @Query() query: PaginationQueryDto,
+    @Query('status') status?: string,
+    @Query('start_date') startDate?: string,
+    @Query('end_date') endDate?: string,
+    @AuthUser() user?: JwtPayload,
+  ) {
+    if (!user || user.type !== 'user') {
+      throw new ForbiddenException('Only admins can view topups');
+    }
+
+    const filters: {
+      status?: TransferStatus;
+      startDate?: Date;
+      endDate?: Date;
+    } = {};
+
+    if (status) {
+      filters.status = status as TransferStatus;
+    }
+
+    if (startDate) {
+      const parsedStart = new Date(startDate);
+      if (!isNaN(parsedStart.getTime())) {
+        filters.startDate = parsedStart;
+      }
+    }
+
+    if (endDate) {
+      const parsedEnd = new Date(endDate);
+      if (!isNaN(parsedEnd.getTime())) {
+        filters.endDate = parsedEnd;
+      }
+    }
+
+    const result = await this.service.listAllTopups(query, filters);
+    return handleSuccessPaginated({
+      data: result.data,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      message: 'Topups retrieved successfully',
+    });
   }
 }

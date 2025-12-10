@@ -22,6 +22,8 @@ import { ExternalPriceFetcherService } from './services/external-price-fetcher.s
 import { StockMetadataService } from './services/stock-metadata.service';
 import { TechnicalIndicatorsService } from './services/technical-indicators.service';
 import { QuotesService } from './services/quotes.service';
+import { CustomersModule } from '../customers/customers.module';
+import { RequiredServiceGuard } from '../../common/guards/required-service.guard';
 
 @Module({
   imports: [
@@ -38,6 +40,7 @@ import { QuotesService } from './services/quotes.service';
       RolePermission,
       StockCategory,
     ]),
+    CustomersModule,
   ],
   controllers: [
     StocksController,
@@ -54,6 +57,7 @@ import { QuotesService } from './services/quotes.service';
     // Use forwardRef wrappers only if needed for circular resolution
     RealTimePriceService,
     StockPricesGateway,
+    RequiredServiceGuard,
   ],
   exports: [
     StocksService,

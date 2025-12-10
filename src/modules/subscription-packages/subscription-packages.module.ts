@@ -6,6 +6,8 @@ import { SubscriptionPackage } from './entities/subscription-package.entity';
 import { CustomerService } from '../customers/entities/customer-service.entity';
 import { SubscriptionPackagesService } from './subscription-packages.service';
 import { SubscriptionPackagesController } from './subscription-packages.controller';
+import { AdminSubscriptionPackagesController } from './admin-subscription-packages.controller';
+import { AdminSubscriptionPackagesService } from './admin-subscription-packages.service';
 import { getJwtConfig } from '../../config/jwt.config';
 
 @Module({
@@ -17,8 +19,8 @@ import { getJwtConfig } from '../../config/jwt.config';
       inject: [ConfigService],
     }),
   ],
-  controllers: [SubscriptionPackagesController],
-  providers: [SubscriptionPackagesService],
-  exports: [SubscriptionPackagesService],
+  controllers: [SubscriptionPackagesController, AdminSubscriptionPackagesController],
+  providers: [SubscriptionPackagesService, AdminSubscriptionPackagesService],
+  exports: [SubscriptionPackagesService, AdminSubscriptionPackagesService],
 })
 export class SubscriptionPackagesModule {}

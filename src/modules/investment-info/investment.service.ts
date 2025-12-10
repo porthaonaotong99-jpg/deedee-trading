@@ -262,6 +262,44 @@ export class InvestmentService {
     });
   }
 
+  // === FLOW 2b: Admin rejects investment request ===
+  async rejectInvestmentRequest(
+    requestId: string,
+    adminId: string,
+    rejectionData: { admin_notes?: string },
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const requestRepo = manager.getRepository(InvestmentRequest);
+
+      const request = await requestRepo.findOne({
+        where: { id: requestId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!request) {
+        throw new NotFoundException('Investment request not found');
+      }
+      if (request.status !== InvestmentRequestStatus.PENDING) {
+        throw new BadRequestException(
+          'Request is not pending. Current status: ' + request.status,
+        );
+      }
+
+      // Update request status to rejected
+      request.status = InvestmentRequestStatus.REJECTED;
+      request.reviewed_by = adminId;
+      request.reviewed_at = new Date();
+      request.admin_notes = rejectionData.admin_notes || null;
+      await requestRepo.save(request);
+
+      return {
+        request_id: request.id,
+        status: 'rejected',
+        message: 'Investment request rejected successfully',
+      };
+    });
+  }
+
   // === FLOW 3: Customer requests money return ===
   async createReturnRequest(dto: CreateReturnRequestDto) {
     if (dto.requested_amount <= 0) {
@@ -437,6 +475,47 @@ export class InvestmentService {
         message: 'Return request approved successfully',
         approved_amount: approvedAmount,
         transaction_type: transaction.return_request_type,
+      };
+    });
+  }
+
+  // === FLOW 4b: Admin rejects return request ===
+  async rejectReturnRequest(
+    transactionId: string,
+    adminId: string,
+    rejectionData: { reason?: string },
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const transactionRepo = manager.getRepository(InvestmentTransaction);
+
+      const transaction = await transactionRepo.findOne({
+        where: { id: transactionId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!transaction) {
+        throw new NotFoundException('Return request not found');
+      }
+      if (
+        transaction.transaction_type !== TransactionType.RETURN_REQUEST ||
+        transaction.return_request_status !== ReturnRequestStatus.PENDING
+      ) {
+        throw new BadRequestException(
+          'Only pending return requests can be rejected',
+        );
+      }
+
+      // Update status to rejected
+      transaction.return_request_status = ReturnRequestStatus.REJECTED;
+      transaction.description = rejectionData.reason
+        ? `Return rejected: ${rejectionData.reason}`
+        : 'Return request rejected by admin';
+      await transactionRepo.save(transaction);
+
+      return {
+        transaction_id: transaction.id,
+        status: 'rejected',
+        message: 'Return request rejected successfully',
       };
     });
   }

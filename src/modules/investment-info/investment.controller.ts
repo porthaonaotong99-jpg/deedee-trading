@@ -508,6 +508,61 @@ export class NewInvestmentController {
   }
 
   @UseGuards(JwtUserAuthGuard)
+  @Put('admin/:id/reject')
+  @ApiOperation({
+    summary: 'Reject investment request (Admin)',
+    description: 'Admin rejects a pending investment request',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Investment request ID',
+    type: 'string',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        admin_notes: { type: 'string', description: 'Reason for rejection' },
+      },
+    },
+    description: 'Optional rejection notes',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Investment request rejected successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Request already processed',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Investment request not found',
+  })
+  async rejectInvestmentRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { admin_notes?: string },
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException(
+        'Only admins can reject investment requests',
+      );
+    }
+
+    const result = await this.investmentService.rejectInvestmentRequest(
+      id,
+      user.sub,
+      { admin_notes: body.admin_notes },
+    );
+
+    return handleSuccessOne({
+      data: result,
+      message: 'Investment request rejected successfully',
+    });
+  }
+
+  @UseGuards(JwtUserAuthGuard)
   @Get('admin/pending-returns')
   @ApiOperation({
     summary: 'List pending return requests (Admin)',
@@ -660,6 +715,59 @@ export class NewInvestmentController {
     return handleSuccessOne({
       data: result,
       message: 'Return request approved successfully',
+    });
+  }
+
+  @UseGuards(JwtUserAuthGuard)
+  @Put('admin/returns/:id/reject')
+  @ApiOperation({
+    summary: 'Reject return request (Admin)',
+    description: 'Admin rejects a pending return request',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Return request transaction ID',
+    type: 'string',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', description: 'Reason for rejection' },
+      },
+    },
+    description: 'Optional rejection reason',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Return request rejected successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Return request not in pending status',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Return request not found',
+  })
+  async rejectReturnRequest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { reason?: string },
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can reject return requests');
+    }
+
+    const result = await this.investmentService.rejectReturnRequest(
+      id,
+      user.sub,
+      { reason: body.reason },
+    );
+
+    return handleSuccessOne({
+      data: result,
+      message: 'Return request rejected successfully',
     });
   }
 

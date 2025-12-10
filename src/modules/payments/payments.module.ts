@@ -6,12 +6,16 @@ import { CustomerService } from '../customers/entities/customer-service.entity';
 import { PaymentService } from './services/payment.service';
 import { PaymentRecordService } from './services/payment-record.service';
 import { PaymentAuditService } from './services/payment-audit.service';
+import { PaymentsController } from './payments.controller';
+import { UsersModule } from '../users/users.module';
 
 @Global()
 @Module({
   imports: [
     TypeOrmModule.forFeature([Payment, PaymentAuditLog, CustomerService]),
+    UsersModule,
   ],
+  controllers: [PaymentsController],
   providers: [
     { provide: 'PaymentService', useClass: PaymentService },
     PaymentRecordService,

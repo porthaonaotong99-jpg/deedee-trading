@@ -1,10 +1,18 @@
-import { Controller, Get, Param, Query, Logger } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  Logger,
+  // UseGuards,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiParam,
   ApiQuery,
   ApiResponse,
+  ApiBearerAuth,
 } from '@nestjs/swagger';
 import { TechnicalIndicatorsService } from '../services/technical-indicators.service';
 import type {
@@ -16,8 +24,15 @@ import {
   handleError,
   handleSuccessOne,
 } from '../../../common/utils/response.util';
+// import { RequiredServiceGuard } from '../../../common/guards/required-service.guard';
+// import { RequiresService } from '../../../common/decorators/requires-service.decorator';
+// import { CustomerServiceType } from '../../customers/entities/customer-service.entity';
+// import { JwtCustomerAuthGuard } from 'src/modules/auth/guards/jwt-customer.guard';
 
 @ApiTags('technical Indicators')
+@ApiBearerAuth()
+// @UseGuards(JwtCustomerAuthGuard, RequiredServiceGuard)
+// @RequiresService(CustomerServiceType.PREMIUM_MEMBERSHIP)
 @Controller('technical-indicators')
 export class TechnicalIndicatorsController {
   private readonly logger = new Logger(TechnicalIndicatorsController.name);
@@ -377,12 +392,6 @@ export class TechnicalIndicatorsController {
     example: 'asc',
     enum: ['asc', 'desc'],
   })
-  // @ApiQuery({
-  //   name: 'sort',
-  //   required: false,
-  //   description: 'Polygon sort field (defaults to filing_date)',
-  //   example: 'filing_date',
-  // })
   @ApiResponse({ status: 200, description: 'Revenue series returned' })
   @ApiResponse({ status: 500, description: 'Failed to fetch revenue data' })
   async getRevenue(
@@ -464,6 +473,79 @@ export class TechnicalIndicatorsController {
       return handleError({
         code: 'NEWS_ERROR',
         message: 'Failed to retrieve news articles',
+        error,
+        statusCode: 500,
+      });
+    }
+  }
+
+  @Get(':symbol/documents')
+  @ApiOperation({
+    summary: 'Get company SEC filings and documents',
+    description:
+      'Returns SEC filings including 10-K (annual reports), 10-Q (quarterly reports), 8-K (current events), transcripts, and other regulatory documents similar to TradingView.',
+  })
+  @ApiParam({
+    name: 'symbol',
+    description: 'Stock symbol (e.g., AAPL)',
+    example: 'AAPL',
+  })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    description: 'Filter by filing type',
+    example: '10-K',
+    enum: ['10-K', '10-Q', '8-K', '4', 'DEF 14A', 'S-1', '6-K'],
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Maximum number of documents to return (max 100)',
+    example: '50',
+  })
+  @ApiQuery({
+    name: 'order',
+    required: false,
+    description: 'Sort order by filing date',
+    example: 'desc',
+    enum: ['asc', 'desc'],
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Company documents retrieved successfully',
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Failed to fetch company documents',
+  })
+  async getCompanyDocuments(
+    @Param('symbol') symbol: string,
+    @Query('type') type?: string,
+    @Query('limit') limit = '50',
+    @Query('order') order: 'asc' | 'desc' = 'desc',
+  ) {
+    const parsedLimit = Number.isFinite(Number(limit))
+      ? Math.min(Math.max(Number(limit), 1), 100)
+      : 50;
+
+    try {
+      const data = await this.technicalIndicatorsService.getCompanyDocuments(
+        symbol.toUpperCase(),
+        {
+          type,
+          limit: parsedLimit,
+          order,
+        },
+      );
+
+      return handleSuccessOne({
+        data,
+        message: 'Company documents retrieved successfully',
+      });
+    } catch (error) {
+      return handleError({
+        code: 'DOCUMENTS_ERROR',
+        message: 'Failed to retrieve company documents',
         error,
         statusCode: 500,
       });
