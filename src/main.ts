@@ -1,8 +1,9 @@
-import { NestFactory } from '@nestjs/core';
+import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { IoAdapter } from '@nestjs/platform-socket.io';
+import { ClassSerializerInterceptor } from '@nestjs/common';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -29,6 +30,14 @@ async function bootstrap() {
 
   // Global error response wrapper
   app.useGlobalFilters(new HttpExceptionFilter());
+
+  // Global serializer to handle @Exclude() decorators
+  app.useGlobalInterceptors(
+    new ClassSerializerInterceptor(app.get(Reflector), {
+      excludeExtraneousValues: false,
+      exposeUnsetFields: false,
+    }),
+  );
 
   // Shared Swagger configuration
   const swaggerConfig = new DocumentBuilder()

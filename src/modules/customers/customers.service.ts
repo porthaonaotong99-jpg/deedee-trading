@@ -295,7 +295,9 @@ export class CustomersService {
 
   async create(dto: CreateCustomerDto) {
     const entity = this.repo.create(dto);
-    return this.repo.save(entity);
+    const saved = await this.repo.save(entity);
+    // Fetch without password
+    return this.findOne(saved.id);
   }
 
   async getStats() {
@@ -365,8 +367,22 @@ export class CustomersService {
     // Get total count
     const total = await queryBuilder.getCount();
 
-    // Apply pagination and get data
+    // Apply pagination and get data (exclude password)
     const data = await queryBuilder
+      .select([
+        'customer.id',
+        'customer.first_name',
+        'customer.last_name',
+        'customer.username',
+        'customer.email',
+        'customer.phone_number',
+        'customer.status',
+        'customer.isVerify',
+        'customer.profile',
+        'customer.deleted_by',
+        'customer.created_at',
+        'customer.updated_at',
+      ])
       .skip(skip)
       .take(limit)
       .orderBy('customer.created_at', 'DESC')
@@ -377,7 +393,7 @@ export class CustomersService {
     const services =
       customerIds.length > 0
         ? await this.customerServiceRepo.find({
-            where: { customer_id: In(customerIds) },
+            where: { customer_id: In(customerIds), active: true },
             select: [
               'id',
               'customer_id',
@@ -409,7 +425,23 @@ export class CustomersService {
   }
 
   async findOne(id: string) {
-    const entity = await this.repo.findOne({ where: { id } });
+    const entity = await this.repo.findOne({
+      where: { id },
+      select: [
+        'id',
+        'first_name',
+        'last_name',
+        'username',
+        'email',
+        'phone_number',
+        'status',
+        'isVerify',
+        'profile',
+        'deleted_by',
+        'created_at',
+        'updated_at',
+      ],
+    });
     if (!entity) throw new NotFoundException('Customer not found');
     return entity;
   }
@@ -654,16 +686,181 @@ export class CustomersService {
     return this.paymentRecordService.getPaymentHistory(customerId, options);
   }
 
+  /**
+   * Get comprehensive customer details for admin review
+   * Includes: basic info, KYC records, documents, addresses, and services
+   */
+  async getCustomerDetailedForAdmin(
+    customerId: string,
+    serviceType?: CustomerServiceType,
+  ) {
+    // Get customer basic info
+    const customer = await this.repo.findOne({
+      where: { id: customerId },
+      select: [
+        'id',
+        'username',
+        'email',
+        'first_name',
+        'last_name',
+        'phone_number',
+        'profile',
+        'status',
+        'isVerify',
+        'created_at',
+        'updated_at',
+      ],
+    });
+
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    // Get KYC records - filter by service type if provided
+    let kycRecords: CustomerKyc[];
+    if (serviceType) {
+      // Get KYC records associated with the specific service type
+      const services = await this.customerServiceRepo.find({
+        where: { customer_id: customerId, service_type: serviceType },
+      });
+      const kycIds = services
+        .map((s) => s.kyc_id)
+        .filter((id): id is string => id !== null);
+
+      if (kycIds.length > 0) {
+        kycRecords = await this.customerKycRepo.find({
+          where: { id: In(kycIds) },
+          order: { created_at: 'DESC' },
+        });
+      } else {
+        kycRecords = [];
+      }
+    } else {
+      kycRecords = await this.customerKycRepo.find({
+        where: { customer_id: customerId },
+        order: { created_at: 'DESC' },
+      });
+    }
+
+    // Get documents - filter by service-related KYC if service type is provided
+    let documents: CustomerDocument[];
+    if (serviceType && kycRecords.length > 0) {
+      const kycIds = kycRecords.map((kyc) => kyc.id);
+      documents = await this.customerDocumentRepo.find({
+        where: { customer_id: customerId, kyc_id: In(kycIds) },
+        order: { created_at: 'DESC' },
+      });
+    } else if (serviceType) {
+      documents = [];
+    } else {
+      documents = await this.customerDocumentRepo.find({
+        where: { customer_id: customerId },
+        order: { created_at: 'DESC' },
+      });
+    }
+
+    // Get all addresses
+    const addresses = await this.customerAddressRepo.find({
+      where: { customer_id: customerId },
+      order: { created_at: 'DESC' },
+    });
+
+    // Get all services
+    const services = await this.customerServiceRepo.find({
+      where: { customer_id: customerId },
+      order: { applied_at: 'DESC' },
+    });
+
+    return {
+      id: customer.id,
+      username: customer.username,
+      email: customer.email,
+      first_name: customer.first_name,
+      last_name: customer.last_name,
+      phone_number: customer.phone_number,
+      profile: customer.profile,
+      status: customer.status,
+      isVerify: customer.isVerify,
+      created_at: customer.created_at,
+      updated_at: customer.updated_at,
+      kyc_records: kycRecords.map((kyc) => ({
+        id: kyc.id,
+        kyc_level: kyc.kyc_level,
+        status: kyc.status,
+        dob: kyc.dob,
+        nationality: kyc.nationality,
+        marital_status: kyc.marital_status,
+        employment_status: kyc.employment_status,
+        annual_income: kyc.annual_income,
+        employer_name: kyc.employer_name,
+        occupation: kyc.occupation,
+        investment_experience: kyc.investment_experience,
+        dependent_number: kyc.dependent_number,
+        source_of_funds: kyc.source_of_funds,
+        risk_tolerance: kyc.risk_tolerance,
+        pep_flag: kyc.pep_flag,
+        tax_id: kyc.tax_id,
+        fatca_status: kyc.fatca_status,
+        submitted_at: kyc.submitted_at,
+        reviewed_at: kyc.reviewed_at,
+        reviewed_by: kyc.reviewed_by,
+        rejection_reason: kyc.rejection_reason,
+        created_at: kyc.created_at,
+        updated_at: kyc.updated_at,
+      })),
+      documents: documents.map((doc) => ({
+        id: doc.id,
+        doc_type: doc.doc_type,
+        storage_ref: doc.storage_ref,
+        kyc_id: doc.kyc_id,
+        metadata: doc.metadata,
+        created_at: doc.created_at,
+      })),
+      addresses: addresses.map((addr) => ({
+        id: addr.id,
+        address_line: addr.address_line,
+        village: addr.village,
+        postal_code: addr.postal_code,
+        country_id: addr.country_id,
+        province_id: addr.province_id,
+        district_id: addr.district_id,
+        is_primary: addr.is_primary,
+        created_at: addr.created_at,
+      })),
+      services: services.map((service) => ({
+        service_id: service.id,
+        service_type: service.service_type,
+        active: service.active,
+        status: service.status,
+        subscription_duration: service.subscription_duration,
+        subscription_fee: service.subscription_fee,
+        subscription_expires_at: service.subscription_expires_at,
+        invested_amount: service.invested_amount,
+        balance: service.balance,
+        applied_at: service.applied_at,
+        kyc_id: service.kyc_id,
+      })),
+    };
+  }
+
   async update(id: string, dto: UpdateCustomerDto) {
-    const entity = await this.findOne(id);
+    // Fetch with password for update
+    const entity = await this.repo.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException('Customer not found');
     Object.assign(entity, dto);
-    return this.repo.save(entity);
+    await this.repo.save(entity);
+    // Return without password
+    return this.findOne(id);
   }
 
   async updateStatus(id: string, status: CustomerStatus) {
-    const entity = await this.findOne(id);
+    // Fetch with password for update
+    const entity = await this.repo.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException('Customer not found');
     entity.status = status;
-    return this.repo.save(entity);
+    await this.repo.save(entity);
+    // Return without password
+    return this.findOne(id);
   }
 
   async remove(id: string) {
@@ -913,12 +1110,25 @@ export class CustomersService {
     },
   ) {
     // 1. Early idempotency check (outside transaction for fast path)
-    const existing = await this.customerServiceRepo.findOne({
-      where: { customer_id: customerId, service_type: serviceType },
-    });
-    if (existing) {
-      return { service: existing, status: 'already_active' };
-    }
+    // const existing = await this.customerServiceRepo.findOne({
+    //   where: { customer_id: customerId, service_type: serviceType },
+    //   order: { applied_at: 'DESC' }, // Get the most recent application
+    // });
+    // console.log({ existing });
+    // if (existing) {
+    //   if (existing.active) {
+    //     return { service: existing, status: 'already_active' };
+    //   } else if (
+    //     !existing.active &&
+    //     existing.status === SubscriptionStatus.PENDING
+    //   ) {
+    //     return { service: existing, status: 'pending_admin_approval' };
+    //   }
+    //   // If status is CANCELLED, SUSPENDED, or EXPIRED (rejected), allow reapplication
+    //   // The transaction will handle cleanup/creation of new service record
+    // }
+
+    console.log('=====');
 
     // 2. Configuration lookup
     const cfg = this.requiredConfig[serviceType];
@@ -943,9 +1153,30 @@ export class CustomersService {
         .getRepository(CustomerService)
         .findOne({
           where: { customer_id: customerId, service_type: serviceType },
+          order: { applied_at: 'DESC' },
         });
+
       if (existingInside) {
-        return { service: existingInside, status: 'already_active' };
+        // If service is active, prevent duplicate
+        if (existingInside.active) {
+          return { service: existingInside, status: 'already_active' };
+        }
+        // If service is pending approval, return existing
+        if (existingInside.status === SubscriptionStatus.PENDING) {
+          return { service: existingInside, status: 'pending_admin_approval' };
+        }
+        // If service was rejected/cancelled/suspended, delete it to allow fresh application
+        // This ensures clean state for reapplication
+        if (
+          existingInside.status === SubscriptionStatus.CANCELLED ||
+          existingInside.status === SubscriptionStatus.SUSPENDED ||
+          existingInside.status === SubscriptionStatus.EXPIRED
+        ) {
+          await manager.getRepository(CustomerService).remove(existingInside);
+          this.logger.log(
+            `Removed rejected/cancelled service ${existingInside.id} for customer ${customerId} to allow reapplication`,
+          );
+        }
       }
 
       // (a) KYC creation / duplication (optional)
@@ -977,7 +1208,35 @@ export class CustomersService {
         }
         kycRecord = await kycRepoTx.save(kycRecord);
       } else if (serviceNeedsKyc) {
-        // No KYC input but service requires KYC: attempt duplication of prior approved KYC
+        // No KYC input but service requires KYC
+        // Check if there's a rejected service application for THIS specific service type
+        // If so, customer must provide new KYC data to reapply
+        const rejectedServiceForType = await manager
+          .getRepository(CustomerService)
+          .findOne({
+            where: {
+              customer_id: customerId,
+              service_type: serviceType,
+              status: SubscriptionStatus.CANCELLED,
+            },
+            order: { applied_at: 'DESC' },
+            relations: ['kyc'],
+          });
+
+        if (rejectedServiceForType?.kyc_id) {
+          const rejectedKyc = await kycRepoTx.findOne({
+            where: { id: rejectedServiceForType.kyc_id },
+          });
+
+          if (rejectedKyc && rejectedKyc.status === KycStatus.REJECTED) {
+            // The KYC for this specific service was rejected - require fresh submission
+            throw new BadRequestException(
+              `Your previous ${serviceType} application was rejected. Reason: ${rejectedKyc.rejection_reason || 'Not specified'}. Please submit updated KYC information and documents to reapply.`,
+            );
+          }
+        }
+
+        // Attempt duplication of prior approved KYC (for different service or first-time with approved KYC)
         const approvedKycs = await kycRepoTx.find({
           where: { customer_id: customerId, status: KycStatus.APPROVED },
           order: { created_at: 'DESC' },
@@ -1306,8 +1565,9 @@ export class CustomersService {
           const successfulPayment = paymentRecords[0];
 
           if (successfulPayment) {
-            // Mark service as rejected (just set active to false)
+            // Mark service as rejected (set status to cancelled and active to false)
             service.active = false;
+            service.status = SubscriptionStatus.CANCELLED;
             const savedService = await svcRepo.save(service);
 
             // Log rejection in payment audit
@@ -1357,7 +1617,9 @@ export class CustomersService {
         pendingKyc.rejection_reason = rejectionReason || null;
         await kycRepo.save(pendingKyc);
 
+        // Mark service as cancelled and inactive
         service.active = false;
+        service.status = SubscriptionStatus.CANCELLED;
         const savedService = await svcRepo.save(service);
 
         return {
@@ -2921,7 +3183,7 @@ export class CustomersService {
   /**
    * Get pending applications for International Stock Account
    */
-  async getPendingInternationalStockAccounts(
+  async getInternationalStockAccounts(
     options: PaginationOptions & {
       kyc_status?: KycStatus;
       search?: string;
@@ -2942,7 +3204,7 @@ export class CustomersService {
       .where('s.service_type = :stype', {
         stype: CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT,
       })
-      .andWhere('s.active = :active', { active: false })
+      // .andWhere('s.active = :active', { active: false })
       .orderBy('s.applied_at', 'DESC')
       .skip(skip)
       .take(limit);
@@ -3014,7 +3276,7 @@ export class CustomersService {
       .where('s.service_type = :stype', {
         stype: CustomerServiceType.GUARANTEED_RETURNS,
       })
-      .andWhere('s.active = :active', { active: false })
+      // .andWhere('s.active = :active', { active: false })
       .orderBy('s.applied_at', 'DESC')
       .skip(skip)
       .take(limit);

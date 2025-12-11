@@ -8,6 +8,7 @@ import {
   OneToOne,
   Index,
 } from 'typeorm';
+import { Exclude } from 'class-transformer';
 import { CustomerStatus } from '../../../common/enums';
 import { AuditLog } from 'src/modules/audit-logs/entities/audit-log.entity';
 import { TransferHistory } from 'src/modules/transfer-history/entities/transfer-history.entity';
@@ -33,6 +34,7 @@ export class Customer {
   @Column({ type: 'varchar', nullable: false })
   username: string; // uniqueness enforced by uq_customers_username index
 
+  @Exclude()
   @Column({ type: 'varchar', nullable: false })
   password: string;
 

@@ -26,6 +26,7 @@ import {
 import { CustomersService } from './customers.service';
 import { Customer } from './entities/customer.entity';
 import { CustomerStatus } from '../../common/enums';
+import { CustomerServiceType } from './entities/customer-service.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { JwtUserAuthGuard } from '../auth/guards/jwt-user.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -129,6 +130,25 @@ export class CustomersController {
   async findOne(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.service.findOne(id);
     return handleSuccessOne({ data, message: 'Customer found' });
+  }
+
+  @Get(':id/detailed')
+  @UseGuards(PermissionsGuard)
+  @Permissions('customers:read')
+  @ApiOperation({
+    summary:
+      'Get comprehensive customer details with KYC, documents, and services [staff only]',
+  })
+  @ApiResponse({ status: 200, description: 'Customer details retrieved' })
+  async getCustomerDetailed(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('service_type') serviceType?: CustomerServiceType,
+  ) {
+    const data = await this.service.getCustomerDetailedForAdmin(
+      id,
+      serviceType,
+    );
+    return handleSuccessOne({ data, message: 'Customer details retrieved' });
   }
 
   @Get('profile/me')

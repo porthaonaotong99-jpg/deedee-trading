@@ -979,7 +979,7 @@ export class CustomerServicesController {
     status: 200,
     description: 'Pending international stock account applications retrieved',
   })
-  async getPendingInternationalStockAccounts(
+  async getInternationalStockAccounts(
     @AuthUser() user: JwtPayload,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -989,13 +989,12 @@ export class CustomerServicesController {
     if (user.type !== 'user') {
       throw new ForbiddenException('Only admins can view pending applications');
     }
-    const result =
-      await this.customersService.getPendingInternationalStockAccounts({
-        page: page ? parseInt(page, 10) : undefined,
-        limit: limit ? parseInt(limit, 10) : undefined,
-        kyc_status: kycStatus,
-        search: search,
-      });
+    const result = await this.customersService.getInternationalStockAccounts({
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      kyc_status: kycStatus,
+      search: search,
+    });
     return handleSuccessPaginated({
       data: result.data,
       total: result.total,
