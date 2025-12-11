@@ -8,6 +8,7 @@ import {
   ForbiddenException,
   BadRequestException,
   Param,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -585,6 +586,33 @@ export class CustomerServicesController {
     });
   }
 
+  @Get('admin/premium-membership/:serviceId/details')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiOperation({
+    summary: 'Get premium membership subscription detail (admin)',
+    description:
+      'Return full customer, subscription, payment, KYC, and document context for a specific premium membership service record.',
+  })
+  @ApiParam({ name: 'serviceId', description: 'Customer service ID (UUID)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Premium membership subscription detail retrieved',
+  })
+  async getPremiumMembershipDetail(
+    @AuthUser() user: JwtPayload,
+    @Param('serviceId', ParseUUIDPipe) serviceId: string,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can view subscription details');
+    }
+    const data =
+      await this.customersService.getPremiumMembershipDetail(serviceId);
+    return handleSuccessOne({
+      data,
+      message: 'Premium membership subscription detail retrieved',
+    });
+  }
+
   @Get('admin/premium-membership')
   @UseGuards(JwtUserAuthGuard)
   @ApiOperation({
@@ -1140,6 +1168,35 @@ export class CustomerServicesController {
     return handleSuccessOne({
       data,
       message: 'Service statistics retrieved',
+    });
+  }
+
+  @Get(':serviceId/detail')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiOperation({
+    summary: 'Get service application detail (admin)',
+    description:
+      'Get full details for any service application including customer info, KYC, and payment info.',
+  })
+  @ApiParam({
+    name: 'serviceId',
+    description: 'Service ID (UUID)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Service detail retrieved',
+  })
+  async getServiceDetail(
+    @AuthUser() user: JwtPayload,
+    @Param('serviceId', ParseUUIDPipe) serviceId: string,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can view service details');
+    }
+    const data = await this.customersService.getServiceDetail(serviceId);
+    return handleSuccessOne({
+      data,
+      message: 'Service detail retrieved',
     });
   }
 }

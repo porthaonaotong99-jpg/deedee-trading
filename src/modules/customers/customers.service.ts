@@ -67,6 +67,7 @@ import {
   PaymentAuditLevel,
 } from '../payments/entities/payment-audit-log.entity';
 import { SubscriptionPackagesService } from '../subscription-packages/subscription-packages.service';
+import { SubscriptionPackage } from '../subscription-packages/entities/subscription-package.entity';
 import {
   ServiceFundTransaction,
   ServiceFundTransactionType,
@@ -129,6 +130,74 @@ export interface PremiumMembershipSubscription {
   applied_at: Date;
   latest_payment_status?: PaymentStatus | null;
   status: SubscriptionStatus;
+}
+
+export interface PremiumMembershipDetail {
+  service: {
+    id: string;
+    service_type: CustomerServiceType;
+    status: SubscriptionStatus;
+    active: boolean;
+    requires_payment: boolean;
+    applied_at: Date;
+    subscription_duration: SubscriptionDuration | null;
+    subscription_fee: number | null;
+    subscription_expires_at: Date | null;
+    subscription_package_id: string | null;
+    balance: number;
+    invested_amount: number;
+    kyc_id: string | null;
+  };
+  customer: {
+    id: string;
+    username: string;
+    email: string;
+    first_name: string;
+    last_name: string | null;
+    phone_number: string | null;
+    status: CustomerStatus;
+    isVerify: boolean;
+    profile: string | null;
+    created_at: Date;
+    updated_at: Date;
+  };
+  package: {
+    id: string;
+    service_type: CustomerServiceType;
+    duration_months: number;
+    price: number;
+    currency: string;
+    description: string | null;
+    features: string[] | null;
+    active: boolean;
+  } | null;
+  addresses: Array<{
+    id: string;
+    address_line: string | null;
+    village: string | null;
+    postal_code: string | null;
+    country_id: string | null;
+    province_id: string | null;
+    district_id: string | null;
+    is_primary: boolean;
+    created_at: Date;
+  }>;
+  payments: Array<{
+    id: string;
+    status: PaymentStatus;
+    amount: number;
+    currency: string;
+    payment_method: PaymentMethod;
+    payment_type: PaymentType;
+    description: string | null;
+    payment_slip_url: string | null;
+    payment_slip_filename: string | null;
+    payment_reference: string | null;
+    admin_notes: string | null;
+    paid_at: Date | null;
+    created_at: Date;
+    updated_at: Date;
+  }>;
 }
 
 export interface PendingInternationalStockAccount {
@@ -273,6 +342,8 @@ export class CustomersService {
     private readonly customerKycRepo: Repository<CustomerKyc>,
     @InjectRepository(CustomerAddress)
     private readonly customerAddressRepo: Repository<CustomerAddress>,
+    @InjectRepository(SubscriptionPackage)
+    private readonly subscriptionPackageRepo: Repository<SubscriptionPackage>,
     @InjectRepository(CustomerDocument)
     private readonly customerDocumentRepo: Repository<CustomerDocument>,
     @InjectRepository(PasswordReset)
@@ -3008,6 +3079,144 @@ export class CustomersService {
     };
   }
 
+  async getPremiumMembershipDetail(
+    serviceId: string,
+  ): Promise<PremiumMembershipDetail> {
+    const service = await this.customerServiceRepo.findOne({
+      where: { id: serviceId },
+      relations: ['customer'],
+      select: {
+        id: true,
+        customer_id: true,
+        service_type: true,
+        status: true,
+        active: true,
+        requires_payment: true,
+        subscription_duration: true,
+        subscription_expires_at: true,
+        subscription_fee: true,
+        subscription_package_id: true,
+        balance: true,
+        invested_amount: true,
+        kyc_id: true,
+        applied_at: true,
+        customer: {
+          id: true,
+          username: true,
+          email: true,
+          first_name: true,
+          last_name: true,
+          phone_number: true,
+          status: true,
+          isVerify: true,
+          profile: true,
+          created_at: true,
+          updated_at: true,
+        },
+      },
+    });
+
+    if (
+      !service ||
+      service.service_type !== CustomerServiceType.PREMIUM_MEMBERSHIP
+    ) {
+      throw new NotFoundException('Premium membership service not found');
+    }
+
+    const addresses = await this.customerAddressRepo.find({
+      where: { customer_id: service.customer_id },
+      order: { is_primary: 'DESC', created_at: 'DESC' },
+    });
+    const payments = await this.paymentRepo.find({
+      where: { service_id: service.id },
+      order: { created_at: 'DESC' },
+    });
+    const packageRecord = service.subscription_package_id
+      ? await this.subscriptionPackageRepo.findOne({
+          where: { id: service.subscription_package_id },
+        })
+      : null;
+
+    const toNumber = (value: string | number | null | undefined) =>
+      value === null || value === undefined ? null : Number(value);
+
+    return {
+      service: {
+        id: service.id,
+        service_type: service.service_type,
+        status: service.status,
+        active: service.active,
+        requires_payment: service.requires_payment,
+        applied_at: service.applied_at,
+        subscription_duration: service.subscription_duration,
+        subscription_fee: toNumber(service.subscription_fee),
+        subscription_expires_at: service.subscription_expires_at,
+        subscription_package_id: service.subscription_package_id,
+        balance: payments.reduce(
+          (sum, p) =>
+            p.status === PaymentStatus.SUCCEEDED
+              ? sum + Number(p.amount ?? 0)
+              : sum,
+          0,
+        ),
+        invested_amount: Number(service.invested_amount ?? 0),
+        kyc_id: service.kyc_id,
+      },
+      customer: {
+        id: service.customer.id,
+        username: service.customer.username,
+        email: service.customer.email,
+        first_name: service.customer.first_name,
+        last_name: service.customer.last_name,
+        phone_number: service.customer.phone_number,
+        status: service.customer.status,
+        isVerify: service.customer.isVerify,
+        profile: service.customer.profile,
+        created_at: service.customer.created_at,
+        updated_at: service.customer.updated_at,
+      },
+      package: packageRecord
+        ? {
+            id: packageRecord.id,
+            service_type: packageRecord.service_type,
+            duration_months: packageRecord.duration_months,
+            price: Number(packageRecord.price),
+            currency: packageRecord.currency,
+            description: packageRecord.description,
+            features: packageRecord.features,
+            active: packageRecord.active,
+          }
+        : null,
+      addresses: addresses.map((addr) => ({
+        id: addr.id,
+        address_line: addr.address_line,
+        village: addr.village,
+        postal_code: addr.postal_code,
+        country_id: addr.country_id,
+        province_id: addr.province_id,
+        district_id: addr.district_id,
+        is_primary: addr.is_primary,
+        created_at: addr.created_at,
+      })),
+      payments: payments.map((payment) => ({
+        id: payment.id,
+        status: payment.status,
+        amount: Number(payment.amount ?? 0),
+        currency: payment.currency,
+        payment_method: payment.payment_method,
+        payment_type: payment.payment_type,
+        description: payment.description,
+        payment_slip_url: payment.payment_slip_url,
+        payment_slip_filename: payment.payment_slip_filename,
+        payment_reference: payment.payment_reference,
+        admin_notes: payment.admin_notes,
+        paid_at: payment.paid_at,
+        created_at: payment.created_at,
+        updated_at: payment.updated_at,
+      })),
+    };
+  }
+
   /**
    * Get all premium membership subscriptions from customer_services table
    * This returns actual service records, not payment records
@@ -3515,6 +3724,122 @@ export class CustomersService {
       by_service: statsByService,
       total_pending: totalPending,
       total_active: totalActive,
+    };
+  }
+
+  /**
+   * Get detailed information for any service application
+   * Returns complete service, customer, KYC, payment, and document info
+   */
+  async getServiceDetail(serviceId: string) {
+    const service = await this.customerServiceRepo.findOne({
+      where: { id: serviceId },
+      relations: ['customer'],
+    });
+
+    if (!service) {
+      throw new NotFoundException('Service not found');
+    }
+
+    // Get KYC info if exists
+    let kycInfo: any = null;
+    if (service.kyc_id) {
+      const kyc = await this.customerKycRepo.findOne({
+        where: { id: service.kyc_id },
+      });
+      if (kyc) {
+        kycInfo = {
+          kyc_id: kyc.id,
+          kyc_status: kyc.status,
+          kyc_level: kyc.kyc_level,
+          dob: kyc.dob,
+          nationality: kyc.nationality,
+          marital_status: kyc.marital_status,
+          employment_status: kyc.employment_status,
+          annual_income: kyc.annual_income,
+          employer_name: kyc.employer_name,
+          occupation: kyc.occupation,
+          investment_experience: kyc.investment_experience,
+          dependent_number: kyc.dependent_number,
+          source_of_funds: kyc.source_of_funds,
+          risk_tolerance: kyc.risk_tolerance,
+          pep_flag: kyc.pep_flag,
+          tax_id: kyc.tax_id,
+          fatca_status: kyc.fatca_status,
+          reviewed_by: kyc.reviewed_by,
+          reviewed_at: kyc.reviewed_at,
+          rejection_reason: kyc.rejection_reason,
+          created_at: kyc.created_at,
+          updated_at: kyc.updated_at,
+        };
+      }
+    }
+
+    // Get payment info if service requires payment
+    let paymentInfo: any = null;
+    if (service.requires_payment) {
+      const payment = await this.paymentRepo.findOne({
+        where: { service_id: service.id },
+        order: { created_at: 'DESC' },
+      });
+      if (payment) {
+        paymentInfo = {
+          payment_id: payment.id,
+          status: payment.status,
+          amount: Number(payment.amount ?? 0),
+          currency: payment.currency,
+          payment_method: payment.payment_method,
+          payment_type: payment.payment_type,
+          payment_slip_url: payment.payment_slip_url,
+          payment_slip_filename: payment.payment_slip_filename,
+          payment_reference: payment.payment_reference,
+          admin_notes: payment.admin_notes,
+          paid_at: payment.paid_at,
+          created_at: payment.created_at,
+          updated_at: payment.updated_at,
+        };
+      }
+    }
+
+    // Get subscription package if exists
+    let packageInfo: any = null;
+    if (service.subscription_package_id) {
+      const pkg = await this.subscriptionPackageRepo.findOne({
+        where: { id: service.subscription_package_id },
+      });
+      if (pkg) {
+        packageInfo = {
+          id: pkg.id,
+          service_type: pkg.service_type,
+          duration_months: pkg.duration_months,
+          price: Number(pkg.price),
+          currency: pkg.currency,
+          description: pkg.description,
+          features: pkg.features,
+        };
+      }
+    }
+
+    return {
+      service_id: service.id,
+      customer_id: service.customer_id,
+      service_type: service.service_type,
+      status: service.status,
+      active: service.active,
+      requires_payment: service.requires_payment,
+      applied_at: service.applied_at,
+      subscription_duration: service.subscription_duration,
+      subscription_expires_at: service.subscription_expires_at,
+      subscription_fee: service.subscription_fee
+        ? Number(service.subscription_fee)
+        : null,
+      balance: service.balance ? Number(service.balance) : null,
+      invested_amount: service.invested_amount
+        ? Number(service.invested_amount)
+        : null,
+      kyc_info: kycInfo,
+      payment_info: paymentInfo,
+      package_info: packageInfo,
     };
   }
 }

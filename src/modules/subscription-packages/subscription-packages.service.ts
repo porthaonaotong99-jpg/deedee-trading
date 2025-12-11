@@ -73,6 +73,10 @@ export class SubscriptionPackagesService {
     return qb.getOne();
   }
 
+  async findById(id: string): Promise<SubscriptionPackage | null> {
+    return this.repo.findOne({ where: { id } });
+  }
+
   async listWithCustomerContext(
     filter: SubscriptionPackageFilterDto,
     customerId?: string,
