@@ -4,6 +4,7 @@ import {
   BadRequestException,
   UnauthorizedException,
   Inject,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, MoreThan, LessThan, In } from 'typeorm';
@@ -16,6 +17,7 @@ import { CustomerStatus } from '../../common/enums';
 import {
   CustomerService,
   CustomerServiceType,
+  SubscriptionStatus,
 } from './entities/customer-service.entity';
 import {
   CustomerKyc,
@@ -126,6 +128,7 @@ export interface PremiumMembershipSubscription {
   subscription_package_id: string | null;
   applied_at: Date;
   latest_payment_status?: PaymentStatus | null;
+  status: SubscriptionStatus;
 }
 
 export interface PendingInternationalStockAccount {
@@ -259,6 +262,8 @@ interface UpdateCustomerDto {
 
 @Injectable()
 export class CustomersService {
+  private readonly logger = new Logger(CustomersService.name);
+
   constructor(
     @InjectRepository(Customer)
     private readonly repo: Repository<Customer>,
@@ -293,7 +298,34 @@ export class CustomersService {
     return this.repo.save(entity);
   }
 
-  async findAll(query: PaginationQueryDto) {
+  async getStats() {
+    const totalCustomers = await this.repo.count();
+    const activeCount = await this.repo.count({
+      where: { status: CustomerStatus.ACTIVE },
+    });
+    const inactiveCount = await this.repo.count({
+      where: { status: CustomerStatus.INACTIVE },
+    });
+    const suspendedCount = await this.repo.count({
+      where: { status: CustomerStatus.BAN },
+    });
+
+    return {
+      totalCustomers,
+      activeCount,
+      inactiveCount,
+      suspendedCount,
+    };
+  }
+
+  async findAll(
+    query: PaginationQueryDto & {
+      search?: string;
+      status?: CustomerStatus;
+      startDate?: string;
+      endDate?: string;
+    },
+  ) {
     const { page, limit, skip } = PaginationUtil.calculatePagination({
       page: query.page,
       limit: query.limit,
@@ -301,13 +333,76 @@ export class CustomersService {
       maxLimit: 100,
     });
 
-    const [data, total] = await this.repo.findAndCount({
-      take: limit,
-      skip,
-      order: { created_at: 'DESC' },
+    const queryBuilder = this.repo.createQueryBuilder('customer');
+
+    // Apply search filter
+    if (query.search) {
+      queryBuilder.where(
+        '(customer.first_name ILIKE :search OR customer.last_name ILIKE :search OR customer.email ILIKE :search OR customer.username ILIKE :search)',
+        { search: `%${query.search}%` },
+      );
+    }
+
+    // Apply status filter
+    if (query.status) {
+      queryBuilder.andWhere('customer.status = :status', {
+        status: query.status,
+      });
+    }
+
+    // Apply date range filter
+    if (query.startDate) {
+      queryBuilder.andWhere('customer.created_at >= :startDate', {
+        startDate: query.startDate,
+      });
+    }
+    if (query.endDate) {
+      queryBuilder.andWhere('customer.created_at <= :endDate', {
+        endDate: query.endDate,
+      });
+    }
+
+    // Get total count
+    const total = await queryBuilder.getCount();
+
+    // Apply pagination and get data
+    const data = await queryBuilder
+      .skip(skip)
+      .take(limit)
+      .orderBy('customer.created_at', 'DESC')
+      .getMany();
+
+    // Fetch services for each customer
+    const customerIds = data.map((c) => c.id);
+    const services =
+      customerIds.length > 0
+        ? await this.customerServiceRepo.find({
+            where: { customer_id: In(customerIds) },
+            select: [
+              'id',
+              'customer_id',
+              'service_type',
+              'active',
+              'applied_at',
+            ],
+          })
+        : [];
+
+    // Group services by customer
+    const servicesByCustomer = new Map<string, any[]>();
+    services.forEach((service) => {
+      const existing = servicesByCustomer.get(service.customer_id) || [];
+      existing.push(service);
+      servicesByCustomer.set(service.customer_id, existing);
     });
 
-    return PaginationUtil.createPaginatedResult(data, total, {
+    // Attach services to customers
+    const dataWithServices = data.map((customer) => ({
+      ...customer,
+      services: servicesByCustomer.get(customer.id) || [],
+    }));
+
+    return PaginationUtil.createPaginatedResult(dataWithServices, total, {
       page,
       limit,
     });
@@ -1876,6 +1971,7 @@ export class CustomersService {
       // For services that only require payment (no admin approval), activate immediately
       await this.customerServiceRepo.update(service.id, {
         active: true,
+        status: SubscriptionStatus.ACTIVE,
       });
 
       // Log subscription activation
@@ -2030,13 +2126,6 @@ export class CustomersService {
 
     const fee = Number(pkg.price);
 
-    // Validate payment amount matches subscription fee
-    // if (Math.abs(paymentSlipData.payment_amount - fee) > 0.01) {
-    //   throw new BadRequestException(
-    //     `Payment amount (${paymentSlipData.payment_amount}) does not match subscription fee (${fee})`,
-    //   );
-    // }
-
     // 2) If applying different package while current subscription not expired -> block
     const now = new Date();
     const currentActive = await this.customerServiceRepo.findOne({
@@ -2050,7 +2139,7 @@ export class CustomersService {
       const notExpired =
         !currentActive.subscription_expires_at ||
         currentActive.subscription_expires_at > now;
-      if (notExpired && currentActive.subscription_package_id !== packageId) {
+      if (notExpired) {
         throw new BadRequestException(
           'Your current premium membership is still active. You cannot switch to a different package until it expires.',
         );
@@ -2281,6 +2370,7 @@ export class CustomersService {
           active: true,
           subscription_expires_at: subscriptionExpiresAt,
           subscription_fee: service.subscription_fee ?? payment.amount,
+          status: SubscriptionStatus.ACTIVE,
         });
 
         return {
@@ -2612,22 +2702,47 @@ export class CustomersService {
   }
 
   async checkExpiredSubscriptions() {
+    const now = new Date();
+
+    // Find all services that are expired but not marked as expired
     const expiredServices = await this.customerServiceRepo.find({
-      where: {
-        active: true,
-        subscription_expires_at: LessThan(new Date()),
-      },
+      where: [
+        {
+          subscription_expires_at: LessThan(now),
+          status: SubscriptionStatus.ACTIVE,
+          service_type: CustomerServiceType.PREMIUM_MEMBERSHIP,
+        },
+      ],
+      relations: ['customer'],
     });
 
-    for (const service of expiredServices) {
+    // Update each expired service
+    const updates = expiredServices.map(async (service) => {
       await this.customerServiceRepo.update(service.id, {
         active: false,
+        status: SubscriptionStatus.EXPIRED,
       });
-    }
+
+      // Log for audit trail
+      this.logger.log(
+        `Subscription expired: ${service.service_type} for customer ${service.customer_id} (${service.customer?.email || 'N/A'})`,
+      );
+
+      return service.id;
+    });
+
+    const updatedIds = await Promise.all(updates);
 
     return {
       expired_count: expiredServices.length,
-      expired_services: expiredServices.map((s) => s.id),
+      expired_services: updatedIds,
+      details: expiredServices.map((s) => ({
+        service_id: s.id,
+        service_type: s.service_type,
+        customer_id: s.customer_id,
+        customer_email: s.customer?.email,
+        expired_at: s.subscription_expires_at,
+      })),
     };
   }
 
@@ -2665,33 +2780,9 @@ export class CustomersService {
 
     // Filter by status (active/pending/cancelled/expired)
     if (options.status) {
-      const now = new Date();
-      switch (options.status) {
-        case 'active':
-          qb.andWhere('s.active = :active', { active: true }).andWhere(
-            '(s.subscription_expires_at IS NULL OR s.subscription_expires_at > :now)',
-            { now },
-          );
-          break;
-        case 'pending':
-          qb.andWhere('s.active = :active', { active: false }).andWhere(
-            "(s.subscription_expires_at IS NULL OR (s.subscription_expires_at > :now AND p.status IN ('pending', 'payment_slip_submitted', 'processing')))",
-            { now },
-          );
-          break;
-        case 'expired':
-          qb.andWhere('s.subscription_expires_at IS NOT NULL').andWhere(
-            's.subscription_expires_at <= :now',
-            { now },
-          );
-          break;
-        case 'cancelled':
-          qb.andWhere('s.active = :active', { active: false }).andWhere(
-            "(p.status IN ('failed', 'canceled') OR (s.subscription_expires_at IS NOT NULL AND s.subscription_expires_at <= :now))",
-            { now },
-          );
-          break;
-      }
+      qb.andWhere('s.status = :status', {
+        status: options.status.toLowerCase(),
+      });
     }
 
     // Search by customer name, email, or username
@@ -2703,6 +2794,9 @@ export class CustomersService {
     }
 
     const [services, total] = await qb.getManyAndCount();
+    if (total === 0) {
+      return PaginationUtil.createPaginatedResult([], total, { page, limit });
+    }
 
     // Get latest payment status for each service
     const serviceIds = services.map((s) => s.id);
@@ -2735,6 +2829,7 @@ export class CustomersService {
       subscription_package_id: service.subscription_package_id,
       applied_at: service.applied_at,
       latest_payment_status: paymentMap.get(service.id) || null,
+      status: service.status,
     }));
 
     return PaginationUtil.createPaginatedResult(data, total, { page, limit });

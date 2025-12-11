@@ -11,7 +11,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
   constructor(private configService: ConfigService) {
     const fallback = configService.get<string>('JWT_SECRET', 'your-secret-key');
-    const userSecret = configService.get<string>('JWT_USER_SECRET') || fallback;
+    const userSecret =
+      configService.get<string>('JWT_ADMIN_SECRET') || fallback;
     const customerSecret =
       configService.get<string>('JWT_CUSTOMER_SECRET') || fallback;
 

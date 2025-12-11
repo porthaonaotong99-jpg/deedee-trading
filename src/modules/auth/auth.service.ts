@@ -94,7 +94,7 @@ export class AuthService {
     };
 
     const secret =
-      this.configService.get<string>('JWT_USER_SECRET') ||
+      this.configService.get<string>('JWT_ADMIN_SECRET') ||
       this.configService.get<string>('JWT_SECRET', 'your-secret-key');
     const access_token = this.jwtService.sign(payload, { secret });
 

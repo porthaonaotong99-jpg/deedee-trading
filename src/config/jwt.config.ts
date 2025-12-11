@@ -6,7 +6,7 @@ export const getJwtConfig = (
   configService: ConfigService,
 ): JwtModuleOptions => ({
   secret:
-    configService.get<string>('JWT_USER_SECRET') ||
+    configService.get<string>('JWT_ADMIN_SECRET') ||
     configService.get<string>('JWT_CUSTOMER_SECRET', 'your-secret-key'),
   signOptions: {
     expiresIn: configService.get<string>('JWT_EXPIRES_IN', '24h'),
@@ -15,12 +15,12 @@ export const getJwtConfig = (
 
 // Helper to retrieve distinct secrets for manual signing / verification
 export const getJwtSecrets = (configService: ConfigService) => ({
-  userSecret:
-    configService.get<string>('JWT_USER_SECRET') ||
-    configService.get<string>('JWT_CUSTOMER_SECRET', 'your-secret-key'),
+  adminSecret:
+    configService.get<string>('JWT_ADMIN_SECRET') ||
+    configService.get<string>('JWT_SECRET', 'your-secret-key'),
   customerSecret:
     configService.get<string>('JWT_CUSTOMER_SECRET') ||
-    configService.get<string>('JWT_CUSTOMER_SECRET', 'your-secret-key'),
+    configService.get<string>('JWT_SECRET', 'your-secret-key'),
   expiresIn: configService.get<string>('JWT_EXPIRES_IN', '24h'),
 });
 

@@ -24,7 +24,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { JwtUserAuthGuard } from '../auth/guards/jwt-user.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { handleSuccessOne, handleSuccessPaginated } from '../../common/utils/response.util';
+import {
+  handleSuccessOne,
+  handleSuccessPaginated,
+} from '../../common/utils/response.util';
 import { AuthUser } from '../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../common/interfaces';
 import { CustomerServiceType } from '../customers/entities/customer-service.entity';
@@ -233,12 +236,26 @@ export class WalletsController {
   @Get('admin/topups')
   @UseGuards(JwtUserAuthGuard, PermissionsGuard)
   @Permissions('wallets:read')
-  @ApiOperation({ summary: 'List all wallet topup requests with filters (admin)' })
+  @ApiOperation({
+    summary: 'List all wallet topup requests with filters (admin)',
+  })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'status', required: false, enum: ['pending', 'approved', 'rejected'] })
-  @ApiQuery({ name: 'start_date', required: false, description: 'Start date filter (ISO format)' })
-  @ApiQuery({ name: 'end_date', required: false, description: 'End date filter (ISO format)' })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['pending', 'approved', 'rejected'],
+  })
+  @ApiQuery({
+    name: 'start_date',
+    required: false,
+    description: 'Start date filter (ISO format)',
+  })
+  @ApiQuery({
+    name: 'end_date',
+    required: false,
+    description: 'End date filter (ISO format)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Topups retrieved successfully',

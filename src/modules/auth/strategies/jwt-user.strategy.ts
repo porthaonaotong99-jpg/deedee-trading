@@ -9,7 +9,7 @@ export class JwtUserStrategy extends PassportStrategy(Strategy, 'jwt-user') {
   private readonly secret: string;
   constructor(private readonly config: ConfigService) {
     const fallback = config.get<string>('JWT_SECRET', 'your-secret-key');
-    const secret = config.get<string>('JWT_USER_SECRET') || fallback;
+    const secret = config.get<string>('JWT_ADMIN_SECRET') || fallback;
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,

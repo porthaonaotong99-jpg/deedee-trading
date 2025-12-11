@@ -22,6 +22,14 @@ export enum SubscriptionDuration {
   TWELVE_MONTHS = 12,
 }
 
+export enum SubscriptionStatus {
+  PENDING = 'pending',
+  ACTIVE = 'active',
+  EXPIRED = 'expired',
+  CANCELLED = 'cancelled',
+  SUSPENDED = 'suspended',
+}
+
 @Entity('customer_services')
 export class CustomerService {
   @PrimaryGeneratedColumn('uuid')
@@ -39,6 +47,14 @@ export class CustomerService {
 
   @Column({ type: 'boolean', default: true })
   active: boolean;
+
+  @Column({
+    type: 'enum',
+    enum: SubscriptionStatus,
+    default: SubscriptionStatus.PENDING,
+    comment: 'Subscription lifecycle status',
+  })
+  status: SubscriptionStatus;
 
   @Column({ type: 'boolean', default: false })
   requires_payment: boolean;

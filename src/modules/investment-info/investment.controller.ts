@@ -348,7 +348,7 @@ export class NewInvestmentController {
   // === ADMIN ENDPOINTS ===
 
   @UseGuards(JwtUserAuthGuard)
-  @Get('admin/pending')
+  @Get('admin')
   @ApiOperation({
     summary: 'List pending investment requests (Admin)',
     description: 'View all pending investment requests for admin review',

@@ -83,14 +83,33 @@ export class CustomersController {
     });
   }
 
+  @Get('stats')
+  @UseGuards(PermissionsGuard)
+  @Permissions('customers:read')
+  @ApiOperation({ summary: 'Get customer statistics [staff only]' })
+  async getStats() {
+    const data = await this.service.getStats();
+    return handleSuccessOne({ data, message: 'Customer stats fetched' });
+  }
+
   @Get()
   @UseGuards(PermissionsGuard)
   @Permissions('customers:read')
   @ApiOperation({ summary: 'List customers (paginated) [staff only]' })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'startDate', required: false })
+  @ApiQuery({ name: 'endDate', required: false })
   async findAll(
-    @Query() query: PaginationQueryDto,
+    @Query()
+    query: PaginationQueryDto & {
+      search?: string;
+      status?: CustomerStatus;
+      startDate?: string;
+      endDate?: string;
+    },
   ): Promise<IPaginatedResponse<Customer>> {
     const result = await this.service.findAll(query);
     return handleSuccessPaginated({
