@@ -1250,8 +1250,6 @@ export class CustomersService {
     //   // The transaction will handle cleanup/creation of new service record
     // }
 
-    console.log('=====');
-
     // 2. Configuration lookup
     const cfg = this.requiredConfig[serviceType];
     if (!cfg) throw new BadRequestException('Unsupported service');

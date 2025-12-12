@@ -65,6 +65,27 @@ export class AdminDashboardStatsDto {
 
   @ApiProperty({ description: 'Display formatted total revenue' })
   displayTotalRevenue: string;
+
+  @ApiProperty({ description: 'Total approved stock pick payments amount' })
+  totalApprovedStockPickPayments: number;
+
+  @ApiProperty({
+    description: 'Display formatted total approved stock pick payments',
+  })
+  displayTotalApprovedStockPickPayments: string;
+
+  @ApiProperty({
+    description: 'Total approved membership subscriptions amount',
+  })
+  totalApprovedMembershipSubscriptions: number;
+
+  @ApiProperty({
+    description: 'Display formatted total approved membership subscriptions',
+  })
+  displayTotalApprovedMembershipSubscriptions: string;
+
+  @ApiProperty({ description: 'Total approved stock transactions count' })
+  totalApprovedStockTransactions: number;
 }
 
 export class RecentActivityDto {
@@ -151,6 +172,48 @@ export class AdminCustomerGrowthChartDto {
 
   @ApiProperty({ description: 'Display growth percentage' })
   displayGrowthPercent: string;
+
+  @ApiProperty({ description: 'Year' })
+  year: number;
+}
+
+export class AdminStockPicksChartDto {
+  @ApiProperty({
+    description: 'Chart data by month',
+    type: [AdminChartDataPointDto],
+  })
+  chartData: AdminChartDataPointDto[];
+
+  @ApiProperty({ description: 'Total stock picks' })
+  totalStockPicks: number;
+
+  @ApiProperty({ description: 'Year' })
+  year: number;
+}
+
+export class AdminSubscriptionsChartDto {
+  @ApiProperty({
+    description: 'Chart data by month',
+    type: [AdminChartDataPointDto],
+  })
+  chartData: AdminChartDataPointDto[];
+
+  @ApiProperty({ description: 'Total subscriptions' })
+  totalSubscriptions: number;
+
+  @ApiProperty({ description: 'Year' })
+  year: number;
+}
+
+export class AdminStockTransactionsChartDto {
+  @ApiProperty({
+    description: 'Chart data by month',
+    type: [AdminChartDataPointDto],
+  })
+  chartData: AdminChartDataPointDto[];
+
+  @ApiProperty({ description: 'Total stock transactions' })
+  totalTransactions: number;
 
   @ApiProperty({ description: 'Year' })
   year: number;

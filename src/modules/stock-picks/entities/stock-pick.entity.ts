@@ -102,19 +102,19 @@ export class StockPick {
 
   @Column({
     type: 'decimal',
-    precision: 5,
+    precision: 7,
     scale: 2,
     nullable: true,
-    comment: 'Expected minimum return percentage (0-100)',
+    comment: 'Expected minimum return percentage (0-100000)',
   })
   expected_return_min_percent: number | null;
 
   @Column({
     type: 'decimal',
-    precision: 5,
+    precision: 7,
     scale: 2,
     nullable: true,
-    comment: 'Expected maximum return percentage (0-100)',
+    comment: 'Expected maximum return percentage (0-100000)',
   })
   expected_return_max_percent: number | null;
 

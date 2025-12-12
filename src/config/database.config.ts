@@ -13,7 +13,7 @@ export const getDatabaseConfig = (
     database: configService.get<string>('DATABASE_NAME', 'trading_db'),
     entities: [__dirname + '/../**/*.entity{.ts,.js}'],
     migrations: [__dirname + '/../database/migrations/*{.ts,.js}'],
-    synchronize: false,
+    synchronize: true,
     // synchronize: configService.get<boolean>('DATABASE_SYNCHRONIZE', false),
     logging: configService.get<boolean>('DATABASE_LOGGING', true),
     ssl: false, // Explicitly disable SSL for local development
@@ -24,13 +24,6 @@ export const getDatabaseConfig = (
       connectionTimeoutMillis: 2000,
     },
   };
-
-  console.log('Database Config:', {
-    host: config.host,
-    port: config.port,
-    database: config.database,
-    ssl: config.ssl,
-  });
 
   return config;
 };

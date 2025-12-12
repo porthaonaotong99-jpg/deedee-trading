@@ -491,18 +491,55 @@ export class StockPicksService {
 
     const [data, total] = await queryBuilder.getManyAndCount();
 
-    const mappedData: Array<
-      CustomerStockPickResponseDto & {
-        customer_email: string;
-        customer_name: string;
-        stock_symbol: string;
-      }
-    > = data.map((pick) => ({
-      ...this.mapToCustomerPickResponseDto(pick),
-      customer_email: pick.customer.email,
-      customer_name: `${pick.customer.first_name} ${pick.customer.last_name}`,
-      stock_symbol: pick.stock_pick.stock_symbol,
-    }));
+    const mappedData = data.map((pick) => {
+      const baseDto = this.mapToCustomerPickResponseDto(pick);
+      return {
+        ...baseDto,
+        customer_email: pick.customer.email,
+        customer_name: `${pick.customer.first_name} ${pick.customer.last_name}`,
+        stock_symbol: pick.stock_pick.stock_symbol,
+        customer: {
+          id: pick.customer.id,
+          first_name: pick.customer.first_name,
+          last_name: pick.customer.last_name,
+          email: pick.customer.email,
+        },
+        stock_pick: {
+          id: pick.stock_pick.id,
+          stock_symbol: pick.stock_pick.stock_symbol,
+          company: pick.stock_pick.company,
+          description: pick.stock_pick.description,
+          service_type: pick.stock_pick.service_type,
+          current_price: pick.stock_pick.current_price
+            ? Number(pick.stock_pick.current_price)
+            : null,
+          target_price: pick.stock_pick.target_price
+            ? Number(pick.stock_pick.target_price)
+            : null,
+          sale_price: pick.stock_pick.sale_price
+            ? Number(pick.stock_pick.sale_price)
+            : 0,
+          status: pick.stock_pick.status,
+          availability: pick.stock_pick.availability,
+          risk_level: pick.stock_pick.risk_level,
+          recommendation: pick.stock_pick.recommendation,
+          expected_return_min_percent: pick.stock_pick
+            .expected_return_min_percent
+            ? Number(pick.stock_pick.expected_return_min_percent)
+            : null,
+          expected_return_max_percent: pick.stock_pick
+            .expected_return_max_percent
+            ? Number(pick.stock_pick.expected_return_max_percent)
+            : null,
+          time_horizon_min_months: pick.stock_pick.time_horizon_min_months,
+          time_horizon_max_months: pick.stock_pick.time_horizon_max_months,
+          sector: pick.stock_pick.sector,
+          analyst_name: pick.stock_pick.analyst_name,
+          admin_notes: pick.stock_pick.admin_notes,
+          created_at: pick.stock_pick.created_at,
+        },
+      };
+    });
 
     return PaginationUtil.createPaginatedResult(mappedData, total, {
       page: validPage,
@@ -515,6 +552,35 @@ export class StockPicksService {
       customer_email: string;
       customer_name: string;
       stock_symbol: string;
+      selected_price: number | null;
+      customer: {
+        id: string;
+        first_name: string;
+        last_name: string;
+        email: string;
+      };
+      stock_pick: {
+        id: string;
+        stock_symbol: string;
+        company: string | null;
+        description: string;
+        service_type: string;
+        current_price: number | null;
+        target_price: number | null;
+        sale_price: number;
+        status: string;
+        availability: string;
+        risk_level: string | null;
+        recommendation: string | null;
+        expected_return_min_percent: number | null;
+        expected_return_max_percent: number | null;
+        time_horizon_min_months: number | null;
+        time_horizon_max_months: number | null;
+        sector: string | null;
+        analyst_name: string | null;
+        admin_notes: string | null;
+        created_at: Date;
+      };
     }
   > {
     const customerPick = await this.customerPickRepo.findOne({
@@ -531,6 +597,51 @@ export class StockPicksService {
       customer_email: customerPick.customer.email,
       customer_name: `${customerPick.customer.first_name} ${customerPick.customer.last_name}`,
       stock_symbol: customerPick.stock_pick.stock_symbol,
+      customer: {
+        id: customerPick.customer.id,
+        first_name: customerPick.customer.first_name,
+        last_name: customerPick.customer.last_name,
+        email: customerPick.customer.email,
+      },
+      stock_pick: {
+        id: customerPick.stock_pick.id,
+        stock_symbol: customerPick.stock_pick.stock_symbol,
+        company: customerPick.stock_pick.company,
+        description: customerPick.stock_pick.description,
+        service_type: customerPick.stock_pick.service_type,
+        current_price: customerPick.stock_pick.current_price
+          ? Number(customerPick.stock_pick.current_price)
+          : null,
+        target_price: customerPick.stock_pick.target_price
+          ? Number(customerPick.stock_pick.target_price)
+          : null,
+        sale_price: customerPick.stock_pick.sale_price
+          ? Number(customerPick.stock_pick.sale_price)
+          : 0,
+        status: customerPick.stock_pick.status,
+        availability: customerPick.stock_pick.availability,
+        risk_level: customerPick.stock_pick.risk_level,
+        recommendation: customerPick.stock_pick.recommendation,
+        expected_return_min_percent: customerPick.stock_pick
+          .expected_return_min_percent
+          ? Number(customerPick.stock_pick.expected_return_min_percent)
+          : null,
+        expected_return_max_percent: customerPick.stock_pick
+          .expected_return_max_percent
+          ? Number(customerPick.stock_pick.expected_return_max_percent)
+          : null,
+        time_horizon_min_months:
+          customerPick.stock_pick.time_horizon_min_months,
+        time_horizon_max_months:
+          customerPick.stock_pick.time_horizon_max_months,
+        sector: customerPick.stock_pick.sector,
+        analyst_name: customerPick.stock_pick.analyst_name,
+        admin_notes: customerPick.stock_pick.admin_notes,
+        created_at: customerPick.stock_pick.created_at,
+      },
+      selected_price: customerPick.selected_price
+        ? Number(customerPick.selected_price)
+        : null,
     };
   }
 

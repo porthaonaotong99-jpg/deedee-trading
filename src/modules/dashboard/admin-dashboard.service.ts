@@ -17,6 +17,18 @@ import {
   CustomerKyc,
   KycStatus,
 } from '../customers/entities/customer-kyc.entity';
+import { StockPick } from '../stock-picks/entities/stock-pick.entity';
+import { CustomerService } from '../customers/entities/customer-service.entity';
+import { StockTransaction } from '../stock-transactions/entities/stock-transaction.entity';
+import {
+  CustomerStockPick,
+  CustomerPickStatus,
+} from '../stock-picks/entities/customer-stock-pick.entity';
+import {
+  Payment,
+  PaymentStatus,
+  PaymentType,
+} from '../payments/entities/payment.entity';
 import {
   CustomerStatus,
   TransferIdentify,
@@ -29,7 +41,41 @@ import {
   AdminRevenueChartDto,
   AdminCustomerGrowthChartDto,
   AdminChartDataPointDto,
+  AdminStockPicksChartDto,
+  AdminSubscriptionsChartDto,
+  AdminStockTransactionsChartDto,
 } from './dto/admin-dashboard.dto';
+
+// Constants for month names
+const MONTH_NAMES_SHORT = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+const MONTH_NAMES_FULL = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
 @Injectable()
 export class AdminDashboardService {
@@ -48,14 +94,26 @@ export class AdminDashboardService {
     private readonly walletRepo: Repository<Wallet>,
     @InjectRepository(CustomerKyc)
     private readonly customerKycRepo: Repository<CustomerKyc>,
+    @InjectRepository(StockPick)
+    private readonly stockPickRepo: Repository<StockPick>,
+    @InjectRepository(CustomerService)
+    private readonly customerServiceRepo: Repository<CustomerService>,
+    @InjectRepository(StockTransaction)
+    private readonly stockTransactionRepo: Repository<StockTransaction>,
+    @InjectRepository(CustomerStockPick)
+    private readonly customerStockPickRepo: Repository<CustomerStockPick>,
+    @InjectRepository(Payment)
+    private readonly paymentRepo: Repository<Payment>,
   ) {}
+
+  // ============== Helper Methods ==============
 
   private formatCurrency(value: number, currency = 'USD'): string {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     }).format(value);
   }
 
@@ -64,84 +122,139 @@ export class AdminDashboardService {
     return `${sign}${value.toFixed(2)}%`;
   }
 
+  private parseDecimal(value: string | null | undefined): number {
+    return parseFloat(value || '0');
+  }
+
+  private buildChartDataPoint(
+    monthIndex: number,
+    value: number,
+    isCount = false,
+  ): AdminChartDataPointDto {
+    return {
+      month: MONTH_NAMES_SHORT[monthIndex],
+      monthFull: MONTH_NAMES_FULL[monthIndex],
+      value,
+      displayValue: isCount ? value.toString() : this.formatCurrency(value),
+    };
+  }
+
+  // ============== Admin Stats ==============
+
   async getAdminStats(): Promise<AdminDashboardStatsDto> {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Total customers
-    const totalCustomers = await this.customerRepo.count();
+    // Execute all independent queries in parallel for better performance
+    const [
+      totalCustomers,
+      newCustomersThisMonth,
+      verifiedCustomers,
+      activeCustomers,
+      totalStaff,
+      investmentResult,
+      pendingInvestmentRequests,
+      pendingReturnRequests,
+      pendingTopupRequests,
+      walletResult,
+      pendingKycRequests,
+      stockPickPaymentResult,
+      subscriptionResult,
+      totalApprovedStockTransactions,
+    ] = await Promise.all([
+      // Total customers
+      this.customerRepo.count(),
 
-    // New customers this month
-    const newCustomersThisMonth = await this.customerRepo.count({
-      where: {
-        created_at: MoreThanOrEqual(startOfMonth),
-      },
-    });
+      // New customers this month
+      this.customerRepo.count({
+        where: { created_at: MoreThanOrEqual(startOfMonth) },
+      }),
 
-    // Verified customers
-    const verifiedCustomers = await this.customerRepo.count({
-      where: {
-        isVerify: true,
-      },
-    });
+      // Verified customers
+      this.customerRepo.count({ where: { isVerify: true } }),
 
-    // Active customers
-    const activeCustomers = await this.customerRepo.count({
-      where: {
-        status: CustomerStatus.ACTIVE,
-      },
-    });
+      // Active customers
+      this.customerRepo.count({ where: { status: CustomerStatus.ACTIVE } }),
 
-    // Total staff
-    const totalStaff = await this.userRepo.count();
+      // Total staff
+      this.userRepo.count(),
 
-    // Total investments (sum of approved investment amounts)
-    const investmentResult = await this.investmentTransactionRepo
-      .createQueryBuilder('t')
-      .select('COALESCE(SUM(CAST(t.amount AS DECIMAL)), 0)', 'total')
-      .where('t.transaction_type = :type', {
-        type: TransactionType.INVESTMENT_APPROVED,
-      })
-      .getRawOne<{ total: string }>();
-    const totalInvestments = parseFloat(investmentResult?.total || '0');
+      // Total investments (sum of approved investment amounts)
+      this.investmentTransactionRepo
+        .createQueryBuilder('t')
+        .select('COALESCE(SUM(CAST(t.amount AS DECIMAL)), 0)', 'total')
+        .where('t.transaction_type = :type', {
+          type: TransactionType.INVESTMENT_APPROVED,
+        })
+        .getRawOne<{ total: string }>(),
 
-    // Pending investment requests (use InvestmentRequest entity)
-    const pendingInvestmentRequests = await this.investmentRequestRepo.count({
-      where: {
-        status: InvestmentRequestStatus.PENDING,
-      },
-    });
+      // Pending investment requests
+      this.investmentRequestRepo.count({
+        where: { status: InvestmentRequestStatus.PENDING },
+      }),
 
-    // Pending return requests (use TransactionType.RETURN_REQUEST with pending status)
-    const pendingReturnRequests = await this.investmentTransactionRepo.count({
-      where: {
-        transaction_type: TransactionType.RETURN_REQUEST,
-      },
-    });
+      // Pending return requests
+      this.investmentTransactionRepo.count({
+        where: { transaction_type: TransactionType.RETURN_REQUEST },
+      }),
 
-    // Pending topup requests
-    const pendingTopupRequests = await this.transferHistoryRepo.count({
-      where: {
-        status: TransferStatus.PENDING,
-        identify: TransferIdentify.RECHARGE,
-      },
-    });
+      // Pending topup requests
+      this.transferHistoryRepo.count({
+        where: {
+          status: TransferStatus.PENDING,
+          identify: TransferIdentify.RECHARGE,
+        },
+      }),
 
-    // Total wallet balance
-    const walletResult = await this.walletRepo
-      .createQueryBuilder('w')
-      .select('COALESCE(SUM(CAST(w.balance AS DECIMAL)), 0)', 'total')
-      .getRawOne<{ total: string }>();
-    const totalWalletBalance = parseFloat(walletResult?.total || '0');
+      // Total wallet balance (sum of total_balance + total_cash)
+      this.walletRepo
+        .createQueryBuilder('w')
+        .select(
+          'COALESCE(SUM(CAST(w.total_balance AS DECIMAL) + CAST(w.total_cash AS DECIMAL)), 0)',
+          'total',
+        )
+        .getRawOne<{ total: string }>(),
 
-    // Pending KYC requests
-    const pendingKycRequests = await this.customerKycRepo.count({
-      where: {
-        status: KycStatus.PENDING,
-      },
-    });
+      // Pending KYC requests
+      this.customerKycRepo.count({ where: { status: KycStatus.PENDING } }),
 
-    // Total revenue (same as total investments for now)
+      // Total approved stock pick payments
+      this.customerStockPickRepo
+        .createQueryBuilder('csp')
+        .select(
+          'COALESCE(SUM(CAST(csp.payment_amount AS DECIMAL)), 0)',
+          'total',
+        )
+        .where('csp.status = :status', { status: CustomerPickStatus.APPROVED })
+        .getRawOne<{ total: string }>(),
+
+      // Total approved membership subscriptions from Payment entity
+      this.paymentRepo
+        .createQueryBuilder('p')
+        .select('COALESCE(SUM(CAST(p.amount AS DECIMAL)), 0)', 'total')
+        .where('p.status = :status', { status: PaymentStatus.SUCCEEDED })
+        .andWhere('p.payment_type IN (:...types)', {
+          types: [
+            PaymentType.SUBSCRIPTION,
+            PaymentType.RENEWAL,
+            PaymentType.UPGRADE,
+          ],
+        })
+        .getRawOne<{ total: string }>(),
+
+      // Total stock transactions count
+      this.stockTransactionRepo.count(),
+    ]);
+
+    // Parse results
+    const totalInvestments = this.parseDecimal(investmentResult?.total);
+    const totalWalletBalance = this.parseDecimal(walletResult?.total);
+    const totalApprovedStockPickPayments = this.parseDecimal(
+      stockPickPaymentResult?.total,
+    );
+    const totalApprovedMembershipSubscriptions = this.parseDecimal(
+      subscriptionResult?.total,
+    );
     const totalRevenue = totalInvestments;
 
     return {
@@ -160,18 +273,55 @@ export class AdminDashboardService {
       pendingKycRequests,
       totalRevenue,
       displayTotalRevenue: this.formatCurrency(totalRevenue),
+      totalApprovedStockPickPayments,
+      displayTotalApprovedStockPickPayments: this.formatCurrency(
+        totalApprovedStockPickPayments,
+      ),
+      totalApprovedMembershipSubscriptions,
+      displayTotalApprovedMembershipSubscriptions: this.formatCurrency(
+        totalApprovedMembershipSubscriptions,
+      ),
+      totalApprovedStockTransactions,
     };
   }
 
+  // ============== Recent Activities ==============
+
   async getRecentActivities(limit = 20): Promise<RecentActivityDto[]> {
+    // Fetch all activity types in parallel
+    const [
+      recentCustomers,
+      recentInvestmentRequests,
+      recentReturns,
+      recentTopups,
+    ] = await Promise.all([
+      this.customerRepo.find({
+        order: { created_at: 'DESC' },
+        take: 5,
+      }),
+      this.investmentRequestRepo.find({
+        where: { status: InvestmentRequestStatus.PENDING },
+        relations: ['customer'],
+        order: { created_at: 'DESC' },
+        take: 5,
+      }),
+      this.investmentTransactionRepo.find({
+        where: { transaction_type: TransactionType.RETURN_REQUEST },
+        relations: ['customer'],
+        order: { created_at: 'DESC' },
+        take: 5,
+      }),
+      this.transferHistoryRepo.find({
+        where: { identify: TransferIdentify.RECHARGE },
+        relations: ['customer'],
+        order: { created_at: 'DESC' },
+        take: 5,
+      }),
+    ]);
+
     const activities: RecentActivityDto[] = [];
 
-    // Get recent customers
-    const recentCustomers = await this.customerRepo.find({
-      order: { created_at: 'DESC' },
-      take: 5,
-    });
-
+    // Map recent customers
     for (const customer of recentCustomers) {
       activities.push({
         id: `customer-${customer.id}`,
@@ -188,18 +338,9 @@ export class AdminDashboardService {
       });
     }
 
-    // Get recent investment requests (use InvestmentRequest entity)
-    const recentInvestmentRequests = await this.investmentRequestRepo.find({
-      where: {
-        status: InvestmentRequestStatus.PENDING,
-      },
-      relations: ['customer'],
-      order: { created_at: 'DESC' },
-      take: 5,
-    });
-
+    // Map recent investment requests
     for (const inv of recentInvestmentRequests) {
-      const amount = parseFloat(String(inv.amount || '0'));
+      const amount = this.parseDecimal(String(inv.amount));
       activities.push({
         id: `investment-${inv.id}`,
         type: 'investment_request',
@@ -216,18 +357,9 @@ export class AdminDashboardService {
       });
     }
 
-    // Get recent return requests
-    const recentReturns = await this.investmentTransactionRepo.find({
-      where: {
-        transaction_type: TransactionType.RETURN_REQUEST,
-      },
-      relations: ['customer'],
-      order: { created_at: 'DESC' },
-      take: 5,
-    });
-
+    // Map recent return requests
     for (const ret of recentReturns) {
-      const amount = parseFloat(String(ret.amount || '0'));
+      const amount = this.parseDecimal(String(ret.amount));
       activities.push({
         id: `return-${ret.id}`,
         type: 'return_request',
@@ -244,18 +376,9 @@ export class AdminDashboardService {
       });
     }
 
-    // Get recent topup requests
-    const recentTopups = await this.transferHistoryRepo.find({
-      where: {
-        identify: TransferIdentify.RECHARGE,
-      },
-      relations: ['customer'],
-      order: { created_at: 'DESC' },
-      take: 5,
-    });
-
+    // Map recent topup requests
     for (const topup of recentTopups) {
-      const amount = parseFloat(String(topup.amount || '0'));
+      const amount = this.parseDecimal(String(topup.amount));
       activities.push({
         id: `topup-${topup.id}`,
         type: 'topup_request',
@@ -272,74 +395,48 @@ export class AdminDashboardService {
       });
     }
 
-    // Sort all activities by timestamp descending
-    activities.sort(
-      (a, b) =>
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-    );
-
-    return activities.slice(0, limit);
+    // Sort by timestamp descending and limit
+    return activities
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      )
+      .slice(0, limit);
   }
+
+  // ============== Chart Methods ==============
 
   async getRevenueChart(
     query: AdminDashboardQueryDto,
   ): Promise<AdminRevenueChartDto> {
     const year = query.year || new Date().getFullYear();
-    const monthNames = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    const monthNamesFull = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
 
+    // Use single query with GROUP BY for all months instead of 12 separate queries
+    const monthlyData = await this.investmentTransactionRepo
+      .createQueryBuilder('t')
+      .select('EXTRACT(MONTH FROM t.effective_date)', 'month')
+      .addSelect('COALESCE(SUM(CAST(t.amount AS DECIMAL)), 0)', 'total')
+      .where('t.transaction_type = :type', {
+        type: TransactionType.INVESTMENT_APPROVED,
+      })
+      .andWhere('EXTRACT(YEAR FROM t.effective_date) = :year', { year })
+      .groupBy('EXTRACT(MONTH FROM t.effective_date)')
+      .getRawMany<{ month: string; total: string }>();
+
+    // Create a map for quick lookup
+    const monthMap = new Map<number, number>();
+    for (const row of monthlyData) {
+      monthMap.set(parseInt(row.month), this.parseDecimal(row.total));
+    }
+
+    // Build chart data for all 12 months
     const chartData: AdminChartDataPointDto[] = [];
     let total = 0;
 
     for (let month = 0; month < 12; month++) {
-      const startDate = new Date(year, month, 1);
-      const endDate = new Date(year, month + 1, 0, 23, 59, 59);
-
-      const result = await this.investmentTransactionRepo
-        .createQueryBuilder('t')
-        .select('COALESCE(SUM(CAST(t.amount AS DECIMAL)), 0)', 'total')
-        .where('t.transaction_type = :type', {
-          type: TransactionType.INVESTMENT_APPROVED,
-        })
-        .andWhere('t.effective_date >= :startDate', { startDate })
-        .andWhere('t.effective_date <= :endDate', { endDate })
-        .getRawOne<{ total: string }>();
-
-      const value = parseFloat(result?.total || '0');
+      const value = monthMap.get(month + 1) || 0;
       total += value;
-
-      chartData.push({
-        month: monthNames[month],
-        monthFull: monthNamesFull[month],
-        value,
-        displayValue: this.formatCurrency(value),
-      });
+      chartData.push(this.buildChartDataPoint(month, value, false));
     }
 
     return {
@@ -354,73 +451,45 @@ export class AdminDashboardService {
     query: AdminDashboardQueryDto,
   ): Promise<AdminCustomerGrowthChartDto> {
     const year = query.year || new Date().getFullYear();
-    const monthNames = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    const monthNamesFull = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
 
-    const chartData: AdminChartDataPointDto[] = [];
-    let cumulativeCustomers = 0;
-
-    // Get count of customers before this year
-    const customersBeforeYear = await this.customerRepo
-      .createQueryBuilder('c')
-      .where('c.created_at < :startOfYear', {
-        startOfYear: new Date(year, 0, 1),
-      })
-      .getCount();
-
-    cumulativeCustomers = customersBeforeYear;
-
-    for (let month = 0; month < 12; month++) {
-      const startDate = new Date(year, month, 1);
-      const endDate = new Date(year, month + 1, 0, 23, 59, 59);
-
-      const newCustomers = await this.customerRepo
+    // Get customers before year and monthly new customers in parallel
+    const [customersBeforeYear, monthlyNewCustomers] = await Promise.all([
+      this.customerRepo
         .createQueryBuilder('c')
-        .where('c.created_at >= :startDate', { startDate })
-        .andWhere('c.created_at <= :endDate', { endDate })
-        .getCount();
+        .where('c.created_at < :startOfYear', {
+          startOfYear: new Date(year, 0, 1),
+        })
+        .getCount(),
 
-      cumulativeCustomers += newCustomers;
+      this.customerRepo
+        .createQueryBuilder('c')
+        .select('EXTRACT(MONTH FROM c.created_at)', 'month')
+        .addSelect('COUNT(*)', 'count')
+        .where('EXTRACT(YEAR FROM c.created_at) = :year', { year })
+        .groupBy('EXTRACT(MONTH FROM c.created_at)')
+        .getRawMany<{ month: string; count: string }>(),
+    ]);
 
-      chartData.push({
-        month: monthNames[month],
-        monthFull: monthNamesFull[month],
-        value: newCustomers,
-        displayValue: newCustomers.toString(),
-      });
+    // Create a map for quick lookup
+    const monthMap = new Map<number, number>();
+    for (const row of monthlyNewCustomers) {
+      monthMap.set(parseInt(row.month), parseInt(row.count));
     }
 
-    // Calculate growth percentage
-    const startOfYearCount = customersBeforeYear;
+    // Build chart data
+    const chartData: AdminChartDataPointDto[] = [];
+    let totalNewThisYear = 0;
+
+    for (let month = 0; month < 12; month++) {
+      const value = monthMap.get(month + 1) || 0;
+      totalNewThisYear += value;
+      chartData.push(this.buildChartDataPoint(month, value, true));
+    }
+
+    const cumulativeCustomers = customersBeforeYear + totalNewThisYear;
     const growthPercent =
-      startOfYearCount > 0
-        ? ((cumulativeCustomers - startOfYearCount) / startOfYearCount) * 100
+      customersBeforeYear > 0
+        ? (totalNewThisYear / customersBeforeYear) * 100
         : cumulativeCustomers > 0
           ? 100
           : 0;
@@ -430,6 +499,117 @@ export class AdminDashboardService {
       totalCustomers: cumulativeCustomers,
       growthPercent: Number(growthPercent.toFixed(2)),
       displayGrowthPercent: this.formatPercent(growthPercent),
+      year,
+    };
+  }
+
+  async getStockPicksChart(
+    query: AdminDashboardQueryDto,
+  ): Promise<AdminStockPicksChartDto> {
+    const year = query.year || new Date().getFullYear();
+
+    // Single query with GROUP BY
+    const monthlyData = await this.stockPickRepo
+      .createQueryBuilder('sp')
+      .select('EXTRACT(MONTH FROM sp.created_at)', 'month')
+      .addSelect('COUNT(*)', 'count')
+      .where('EXTRACT(YEAR FROM sp.created_at) = :year', { year })
+      .groupBy('EXTRACT(MONTH FROM sp.created_at)')
+      .getRawMany<{ month: string; count: string }>();
+
+    // Create a map for quick lookup
+    const monthMap = new Map<number, number>();
+    for (const row of monthlyData) {
+      monthMap.set(parseInt(row.month), parseInt(row.count));
+    }
+
+    // Build chart data
+    const chartData: AdminChartDataPointDto[] = [];
+    let total = 0;
+
+    for (let month = 0; month < 12; month++) {
+      const value = monthMap.get(month + 1) || 0;
+      total += value;
+      chartData.push(this.buildChartDataPoint(month, value, true));
+    }
+
+    return {
+      chartData,
+      totalStockPicks: total,
+      year,
+    };
+  }
+
+  async getSubscriptionsChart(
+    query: AdminDashboardQueryDto,
+  ): Promise<AdminSubscriptionsChartDto> {
+    const year = query.year || new Date().getFullYear();
+
+    // Single query with GROUP BY
+    const monthlyData = await this.customerServiceRepo
+      .createQueryBuilder('cs')
+      .select('EXTRACT(MONTH FROM cs.applied_at)', 'month')
+      .addSelect('COUNT(*)', 'count')
+      .where('EXTRACT(YEAR FROM cs.applied_at) = :year', { year })
+      .groupBy('EXTRACT(MONTH FROM cs.applied_at)')
+      .getRawMany<{ month: string; count: string }>();
+
+    // Create a map for quick lookup
+    const monthMap = new Map<number, number>();
+    for (const row of monthlyData) {
+      monthMap.set(parseInt(row.month), parseInt(row.count));
+    }
+
+    // Build chart data
+    const chartData: AdminChartDataPointDto[] = [];
+    let total = 0;
+
+    for (let month = 0; month < 12; month++) {
+      const value = monthMap.get(month + 1) || 0;
+      total += value;
+      chartData.push(this.buildChartDataPoint(month, value, true));
+    }
+
+    return {
+      chartData,
+      totalSubscriptions: total,
+      year,
+    };
+  }
+
+  async getStockTransactionsChart(
+    query: AdminDashboardQueryDto,
+  ): Promise<AdminStockTransactionsChartDto> {
+    const year = query.year || new Date().getFullYear();
+
+    // Single query with GROUP BY
+    const monthlyData = await this.stockTransactionRepo
+      .createQueryBuilder('st')
+      .select('EXTRACT(MONTH FROM st.created_at)', 'month')
+      .addSelect('COUNT(*)', 'count')
+      .where('EXTRACT(YEAR FROM st.created_at) = :year', { year })
+      .groupBy('EXTRACT(MONTH FROM st.created_at)')
+      .getRawMany<{ month: string; count: string }>();
+
+    // Create a map for quick lookup
+    const monthMap = new Map<number, number>();
+    for (const row of monthlyData) {
+      monthMap.set(parseInt(row.month), parseInt(row.count));
+    }
+
+    // Build chart data
+    const chartData: AdminChartDataPointDto[] = [];
+    let total = 0;
+
+    for (let month = 0; month < 12; month++) {
+      const value = monthMap.get(month + 1) || 0;
+      total += value;
+      chartData.push(this.buildChartDataPoint(month, value, true));
+    }
+
+    return {
+      chartData,
+      totalTransactions: total,
       year,
     };
   }

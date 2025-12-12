@@ -21,6 +21,9 @@ import {
   RecentActivityDto,
   AdminRevenueChartDto,
   AdminCustomerGrowthChartDto,
+  AdminStockPicksChartDto,
+  AdminSubscriptionsChartDto,
+  AdminStockTransactionsChartDto,
 } from './dto/admin-dashboard.dto';
 import { AuthUser } from '../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../common/interfaces';
@@ -160,6 +163,108 @@ export class AdminDashboardController {
     return handleSuccessOne({
       data,
       message: 'Customer growth chart data retrieved successfully',
+    });
+  }
+
+  @Get('stock-picks-chart')
+  @ApiOperation({
+    summary: 'Get stock picks chart data',
+    description: 'Returns monthly stock picks data for chart visualization.',
+  })
+  @ApiQuery({
+    name: 'year',
+    required: false,
+    type: Number,
+    description: 'Year for chart data (default: current year)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Stock picks chart data retrieved successfully',
+    type: AdminStockPicksChartDto,
+  })
+  async getStockPicksChart(
+    @AuthUser() user: JwtPayload,
+    @Query(ValidationPipe) query: AdminDashboardQueryDto,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can access stock picks chart');
+    }
+
+    const data = await this.adminDashboardService.getStockPicksChart(query);
+
+    return handleSuccessOne({
+      data,
+      message: 'Stock picks chart data retrieved successfully',
+    });
+  }
+
+  @Get('subscriptions-chart')
+  @ApiOperation({
+    summary: 'Get subscriptions chart data',
+    description: 'Returns monthly subscriptions data for chart visualization.',
+  })
+  @ApiQuery({
+    name: 'year',
+    required: false,
+    type: Number,
+    description: 'Year for chart data (default: current year)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Subscriptions chart data retrieved successfully',
+    type: AdminSubscriptionsChartDto,
+  })
+  async getSubscriptionsChart(
+    @AuthUser() user: JwtPayload,
+    @Query(ValidationPipe) query: AdminDashboardQueryDto,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException(
+        'Only admins can access subscriptions chart',
+      );
+    }
+
+    const data = await this.adminDashboardService.getSubscriptionsChart(query);
+
+    return handleSuccessOne({
+      data,
+      message: 'Subscriptions chart data retrieved successfully',
+    });
+  }
+
+  @Get('stock-transactions-chart')
+  @ApiOperation({
+    summary: 'Get stock transactions chart data',
+    description:
+      'Returns monthly stock transactions data for chart visualization.',
+  })
+  @ApiQuery({
+    name: 'year',
+    required: false,
+    type: Number,
+    description: 'Year for chart data (default: current year)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Stock transactions chart data retrieved successfully',
+    type: AdminStockTransactionsChartDto,
+  })
+  async getStockTransactionsChart(
+    @AuthUser() user: JwtPayload,
+    @Query(ValidationPipe) query: AdminDashboardQueryDto,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException(
+        'Only admins can access stock transactions chart',
+      );
+    }
+
+    const data =
+      await this.adminDashboardService.getStockTransactionsChart(query);
+
+    return handleSuccessOne({
+      data,
+      message: 'Stock transactions chart data retrieved successfully',
     });
   }
 }

@@ -228,7 +228,7 @@ export class CreateStockPickDto {
 export class UpdateStockPickDto {
   @ApiPropertyOptional({
     description: 'Updated description',
-    minLength: 10,
+    minLength: 5,
     maxLength: 500,
   })
   @IsOptional()
@@ -311,23 +311,23 @@ export class UpdateStockPickDto {
   @ApiPropertyOptional({
     description: 'Updated expected min return %',
     minimum: 0,
-    maximum: 100,
+    maximum: 10000,
   })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  @Max(100)
+  @Max(10000)
   expected_return_min_percent?: number;
 
   @ApiPropertyOptional({
     description: 'Updated expected max return %',
     minimum: 0,
-    maximum: 100,
+    maximum: 10000,
   })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  @Max(100)
+  @Max(10000)
   expected_return_max_percent?: number;
 
   @ApiPropertyOptional({ description: 'Updated min holding months' })
@@ -439,7 +439,8 @@ export class CustomerSubmitPaymentSlipDto {
 
 export class AdminApprovePickDto {
   @ApiPropertyOptional({
-    description: 'Admin response message to customer (optional for approval, recommended for rejection)',
+    description:
+      'Admin response message to customer (optional for approval, recommended for rejection)',
     example: 'Great choice! This stock has strong fundamentals.',
     minLength: 1,
     maxLength: 1000,

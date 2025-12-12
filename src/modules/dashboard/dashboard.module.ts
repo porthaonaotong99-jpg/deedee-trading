@@ -12,6 +12,11 @@ import { User } from '../users/entities/user.entity';
 import { TransferHistory } from '../transfer-history/entities/transfer-history.entity';
 import { Wallet } from '../wallets/entities/wallet.entity';
 import { CustomerKyc } from '../customers/entities/customer-kyc.entity';
+import { StockPick } from '../stock-picks/entities/stock-pick.entity';
+import { CustomerService } from '../customers/entities/customer-service.entity';
+import { StockTransaction } from '../stock-transactions/entities/stock-transaction.entity';
+import { CustomerStockPick } from '../stock-picks/entities/customer-stock-pick.entity';
+import { Payment } from '../payments/entities/payment.entity';
 
 @Module({
   imports: [
@@ -24,6 +29,11 @@ import { CustomerKyc } from '../customers/entities/customer-kyc.entity';
       TransferHistory,
       Wallet,
       CustomerKyc,
+      StockPick,
+      CustomerService,
+      StockTransaction,
+      CustomerStockPick,
+      Payment,
     ]),
   ],
   controllers: [DashboardController, AdminDashboardController],
