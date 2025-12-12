@@ -299,7 +299,7 @@ export class CustomerStockPicksController {
     await this.notificationsService.createNotification(
       buildStockPickPaymentNotification(
         { customerId: user.sub, customerName: user.username },
-        id,
+        result.id,
       ),
     );
 

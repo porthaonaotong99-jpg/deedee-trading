@@ -790,6 +790,17 @@ export class InvestmentService {
     };
   }
 
+  async findInvestmentRequestById(id: string): Promise<InvestmentRequest> {
+    const request = await this.requestRepo.findOne({
+      where: { id },
+      relations: ['customer', 'service'],
+    });
+    if (!request) {
+      throw new NotFoundException('Investment request not found');
+    }
+    return request;
+  }
+
   async listPendingReturnsPaginated(
     page?: number,
     limit?: number,

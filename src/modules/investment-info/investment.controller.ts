@@ -481,6 +481,173 @@ export class NewInvestmentController {
   }
 
   @UseGuards(JwtUserAuthGuard)
+  @Get('admin/stats')
+  @ApiOperation({
+    summary: 'Get investment request statistics (Admin)',
+    description: 'Get count of investment requests by status',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Statistics retrieved successfully',
+  })
+  async getInvestmentStats(@AuthUser() user: JwtPayload) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admin users can view statistics');
+    }
+
+    const stats = await this.investmentService.getInvestmentStats();
+
+    return handleSuccessOne({
+      data: stats,
+      message: 'Statistics retrieved successfully',
+    });
+  }
+
+  @UseGuards(JwtUserAuthGuard)
+  @Get('admin/pending-returns')
+  @ApiOperation({
+    summary: 'List pending return requests (Admin)',
+    description: 'View all pending return requests for admin review',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (1-based, default 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Page size (default 20, max 100)',
+  })
+  @ApiQuery({
+    name: 'start_date',
+    required: false,
+    type: String,
+    description: 'Filter start datetime (ISO 8601)',
+    example: '2025-10-01T00:00:00Z',
+  })
+  @ApiQuery({
+    name: 'end_date',
+    required: false,
+    type: String,
+    description: 'Filter end datetime (ISO 8601)',
+    example: '2025-10-31T23:59:59Z',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Pending return requests retrieved successfully (paginated)',
+    schema: {
+      type: 'object',
+      properties: {
+        is_error: { type: 'boolean', example: false },
+        code: { type: 'string', example: 'SUCCESS' },
+        message: {
+          type: 'string',
+          example: 'Pending return requests retrieved successfully',
+        },
+        data: {
+          type: 'array',
+          items: { type: 'object' },
+          example: [
+            {
+              id: 'txn-uuid-ret-1',
+              transaction_type: 'RETURN_REQUEST',
+              return_request_status: 'PENDING',
+              amount: '5000.00',
+              return_request_type: 'PRINCIPAL',
+              created_at: '2025-10-12T16:00:00.000Z',
+            },
+          ],
+        },
+        total: { type: 'number', example: 3 },
+        page: { type: 'number', example: 1 },
+        limit: { type: 'number', example: 20 },
+        totalPages: { type: 'number', example: 1 },
+        error: { type: 'object', nullable: true, example: null },
+        status_code: { type: 'number', example: 200 },
+      },
+    },
+  })
+  async listPendingReturns(
+    @AuthUser() user: JwtPayload,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('start_date') startDateStr?: string,
+    @Query('end_date') endDateStr?: string,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admins can view pending returns');
+    }
+
+    const p = Math.max(1, Number(page) || 1);
+    const l = Math.min(100, Math.max(1, Number(limit) || 20));
+    let startDate: Date | undefined;
+    let endDate: Date | undefined;
+    if (startDateStr) {
+      const d = new Date(startDateStr);
+      if (!isNaN(d.getTime())) startDate = d;
+    }
+    if (endDateStr) {
+      const d = new Date(endDateStr);
+      if (!isNaN(d.getTime())) endDate = d;
+    }
+    const { data, total, totalPages } =
+      await this.investmentService.listPendingReturnsPaginated(
+        p,
+        l,
+        startDate,
+        endDate,
+      );
+    return handleSuccessPaginated({
+      data,
+      total,
+      page: p,
+      limit: l,
+      totalPages,
+      message: 'Pending return requests retrieved successfully',
+    });
+  }
+
+  @UseGuards(JwtUserAuthGuard)
+  @Get('admin/:id')
+  @ApiOperation({
+    summary: 'Get investment request details (Admin)',
+    description:
+      'View detailed information about a specific investment request',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Investment request ID',
+    type: 'string',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Investment request details retrieved successfully',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Investment request not found',
+  })
+  async getInvestmentRequestDetails(
+    @Param('id', ParseUUIDPipe) id: string,
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException(
+        'Only admins can view investment request details',
+      );
+    }
+
+    const data = await this.investmentService.findInvestmentRequestById(id);
+    return handleSuccessOne({
+      data,
+      message: 'Investment request details retrieved successfully',
+    });
+  }
+
+  @UseGuards(JwtUserAuthGuard)
   @Put('admin/:id/approve')
   @ApiOperation({
     summary: 'Approve investment request (Admin)',
@@ -589,113 +756,6 @@ export class NewInvestmentController {
     return handleSuccessOne({
       data: result,
       message: 'Investment request rejected successfully',
-    });
-  }
-
-  @UseGuards(JwtUserAuthGuard)
-  @Get('admin/pending-returns')
-  @ApiOperation({
-    summary: 'List pending return requests (Admin)',
-    description: 'View all pending return requests for admin review',
-  })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    type: Number,
-    description: 'Page number (1-based, default 1)',
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Page size (default 20, max 100)',
-  })
-  @ApiQuery({
-    name: 'start_date',
-    required: false,
-    type: String,
-    description: 'Filter start datetime (ISO 8601)',
-    example: '2025-10-01T00:00:00Z',
-  })
-  @ApiQuery({
-    name: 'end_date',
-    required: false,
-    type: String,
-    description: 'Filter end datetime (ISO 8601)',
-    example: '2025-10-31T23:59:59Z',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Pending return requests retrieved successfully (paginated)',
-    schema: {
-      type: 'object',
-      properties: {
-        is_error: { type: 'boolean', example: false },
-        code: { type: 'string', example: 'SUCCESS' },
-        message: {
-          type: 'string',
-          example: 'Pending return requests retrieved successfully',
-        },
-        data: {
-          type: 'array',
-          items: { type: 'object' },
-          example: [
-            {
-              id: 'txn-uuid-ret-1',
-              transaction_type: 'RETURN_REQUEST',
-              return_request_status: 'PENDING',
-              amount: '5000.00',
-              return_request_type: 'PRINCIPAL',
-              created_at: '2025-10-12T16:00:00.000Z',
-            },
-          ],
-        },
-        total: { type: 'number', example: 3 },
-        page: { type: 'number', example: 1 },
-        limit: { type: 'number', example: 20 },
-        totalPages: { type: 'number', example: 1 },
-        error: { type: 'object', nullable: true, example: null },
-        status_code: { type: 'number', example: 200 },
-      },
-    },
-  })
-  async listPendingReturns(
-    @AuthUser() user: JwtPayload,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-    @Query('start_date') startDateStr?: string,
-    @Query('end_date') endDateStr?: string,
-  ) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admins can view pending returns');
-    }
-
-    const p = Math.max(1, Number(page) || 1);
-    const l = Math.min(100, Math.max(1, Number(limit) || 20));
-    let startDate: Date | undefined;
-    let endDate: Date | undefined;
-    if (startDateStr) {
-      const d = new Date(startDateStr);
-      if (!isNaN(d.getTime())) startDate = d;
-    }
-    if (endDateStr) {
-      const d = new Date(endDateStr);
-      if (!isNaN(d.getTime())) endDate = d;
-    }
-    const { data, total, totalPages } =
-      await this.investmentService.listPendingReturnsPaginated(
-        p,
-        l,
-        startDate,
-        endDate,
-      );
-    return handleSuccessPaginated({
-      data,
-      total,
-      page: p,
-      limit: l,
-      totalPages,
-      message: 'Pending return requests retrieved successfully',
     });
   }
 
@@ -918,29 +978,6 @@ export class NewInvestmentController {
     return handleSuccessOne({
       data,
       message: 'Tier calculation completed successfully',
-    });
-  }
-
-  @UseGuards(JwtUserAuthGuard)
-  @Get('admin/stats')
-  @ApiOperation({
-    summary: 'Get investment request statistics (Admin)',
-    description: 'Get count of investment requests by status',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Statistics retrieved successfully',
-  })
-  async getInvestmentStats(@AuthUser() user: JwtPayload) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admin users can view statistics');
-    }
-
-    const stats = await this.investmentService.getInvestmentStats();
-
-    return handleSuccessOne({
-      data: stats,
-      message: 'Statistics retrieved successfully',
     });
   }
 }
