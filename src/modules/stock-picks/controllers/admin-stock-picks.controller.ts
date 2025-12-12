@@ -269,6 +269,64 @@ export class AdminStockPicksController {
     });
   }
 
+  @Get('customer-picks/stats')
+  @ApiOperation({
+    summary: 'Get customer picks statistics (Admin only)',
+    description: 'Get count of picks by status',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Statistics retrieved successfully',
+  })
+  async getCustomerPicksStats(@AuthUser() user: JwtPayload) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException('Only admin users can view statistics');
+    }
+
+    const stats = await this.stockPicksService.getCustomerPicksStats();
+
+    return handleSuccessOne({
+      data: stats,
+      message: 'Statistics retrieved successfully',
+    });
+  }
+
+  @Get('customer-picks/:id')
+  @ApiOperation({
+    summary: 'Get customer stock pick details (Admin only)',
+    description:
+      'Get detailed information about a specific customer stock pick',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Customer stock pick ID',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Customer pick details retrieved successfully',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Customer pick not found',
+  })
+  async getCustomerPickDetails(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @AuthUser() user: JwtPayload,
+  ) {
+    if (user.type !== 'user') {
+      throw new ForbiddenException(
+        'Only admin users can view customer pick details',
+      );
+    }
+
+    const pick = await this.stockPicksService.getCustomerPickById(id);
+
+    return handleSuccessOne({
+      data: pick,
+      message: 'Customer pick details retrieved successfully',
+    });
+  }
+
   @Post('customer-picks/:id/approve')
   @ApiOperation({
     summary: 'Approve customer stock pick (Admin only)',
@@ -398,28 +456,6 @@ export class AdminStockPicksController {
     return handleSuccessOne({
       data: result,
       message: 'Customer pick rejected successfully',
-    });
-  }
-
-  @Get('customer-picks/stats')
-  @ApiOperation({
-    summary: 'Get customer picks statistics (Admin only)',
-    description: 'Get count of picks by status',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Statistics retrieved successfully',
-  })
-  async getCustomerPicksStats(@AuthUser() user: JwtPayload) {
-    if (user.type !== 'user') {
-      throw new ForbiddenException('Only admin users can view statistics');
-    }
-
-    const stats = await this.stockPicksService.getCustomerPicksStats();
-
-    return handleSuccessOne({
-      data: stats,
-      message: 'Statistics retrieved successfully',
     });
   }
 }

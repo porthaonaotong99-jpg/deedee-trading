@@ -510,6 +510,30 @@ export class StockPicksService {
     });
   }
 
+  async getCustomerPickById(customerPickId: string): Promise<
+    CustomerStockPickResponseDto & {
+      customer_email: string;
+      customer_name: string;
+      stock_symbol: string;
+    }
+  > {
+    const customerPick = await this.customerPickRepo.findOne({
+      where: { id: customerPickId },
+      relations: ['customer', 'stock_pick'],
+    });
+
+    if (!customerPick) {
+      throw new NotFoundException('Customer pick not found');
+    }
+
+    return {
+      ...this.mapToCustomerPickResponseDto(customerPick),
+      customer_email: customerPick.customer.email,
+      customer_name: `${customerPick.customer.first_name} ${customerPick.customer.last_name}`,
+      stock_symbol: customerPick.stock_pick.stock_symbol,
+    };
+  }
+
   async approveCustomerPick(
     customerPickId: string,
     adminUserId: string,
