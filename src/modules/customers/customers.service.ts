@@ -90,6 +90,57 @@ interface ServiceStatusSummary {
   kyc_reviewed_at?: Date | null;
 }
 
+export interface ServiceDetailKycInfo {
+  kyc_id: string;
+  kyc_status: KycStatus;
+  kyc_level: KycLevel;
+  dob: Date | null;
+  nationality: string | null;
+  marital_status: string | null;
+  employment_status: string | null;
+  annual_income: string | null; // Stored as string in database
+  employer_name: string | null;
+  occupation: string | null;
+  investment_experience: number | null; // Stored as number in database
+  dependent_number: number | null;
+  source_of_funds: string | null;
+  risk_tolerance: string | null;
+  pep_flag: boolean | null;
+  tax_id: string | null;
+  fatca_status: string | null;
+  reviewed_by: string | null;
+  reviewed_at: Date | null;
+  rejection_reason: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ServiceDetailPaymentInfo {
+  payment_id: string;
+  status: PaymentStatus;
+  amount: number;
+  currency: string;
+  payment_method: PaymentMethod;
+  payment_type: PaymentType;
+  payment_slip_url: string | null;
+  payment_slip_filename: string | null;
+  payment_reference: string | null;
+  admin_notes: string | null;
+  paid_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface ServiceDetailPackageInfo {
+  id: string;
+  service_type: CustomerServiceType;
+  duration_months: number;
+  price: number;
+  currency: string;
+  description: string | null;
+  features: string[] | null;
+}
+
 export interface PendingPremiumMembership {
   service_id: string;
   customer_id: string;
@@ -3742,7 +3793,7 @@ export class CustomersService {
     }
 
     // Get KYC info if exists
-    let kycInfo: any = null;
+    let kycInfo: ServiceDetailKycInfo | null = null;
     if (service.kyc_id) {
       const kyc = await this.customerKycRepo.findOne({
         where: { id: service.kyc_id },
@@ -3776,7 +3827,7 @@ export class CustomersService {
     }
 
     // Get payment info if service requires payment
-    let paymentInfo: any = null;
+    let paymentInfo: ServiceDetailPaymentInfo | null = null;
     if (service.requires_payment) {
       const payment = await this.paymentRepo.findOne({
         where: { service_id: service.id },
@@ -3802,7 +3853,7 @@ export class CustomersService {
     }
 
     // Get subscription package if exists
-    let packageInfo: any = null;
+    let packageInfo: ServiceDetailPackageInfo | null = null;
     if (service.subscription_package_id) {
       const pkg = await this.subscriptionPackageRepo.findOne({
         where: { id: service.subscription_package_id },

@@ -57,6 +57,15 @@ import { KycLevel, KycStatus } from './entities/customer-kyc.entity';
 import { CustomerServiceType } from './entities/customer-service.entity';
 import { TopupServiceDto } from './dto/funds.dto';
 import { Payment, PaymentStatus } from '../payments/entities/payment.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  buildPremiumMembershipApplicationNotification,
+  buildStockAccountApplicationNotification,
+  buildStockAccountApprovalNotification,
+  buildGuaranteedReturnsApplicationNotification,
+  buildGuaranteedReturnsApprovalNotification,
+  buildTopUpNotification,
+} from '../notifications/utils/notification-builders';
 
 type ApplyServiceResult = Awaited<ReturnType<CustomersService['applyService']>>;
 type ApproveServiceResult = Awaited<
@@ -71,7 +80,10 @@ type RejectServiceResult = Awaited<
 @ApiBearerAuth()
 @Controller('customers/services')
 export class CustomerServicesController {
-  constructor(private readonly customersService: CustomersService) {}
+  constructor(
+    private readonly customersService: CustomersService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   @UseGuards(JwtCustomerAuthGuard)
   @Get('list')
@@ -161,6 +173,29 @@ export class CustomerServicesController {
         })),
       },
     );
+
+    // Send notification to admin for new service application
+    const serviceId = 'service' in result ? result.service.id : undefined;
+    if (serviceId) {
+      if (
+        dto.service_type === CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT
+      ) {
+        await this.notificationsService.createNotification(
+          buildStockAccountApplicationNotification(
+            { customerId: user.sub, customerName: user.username },
+            serviceId,
+          ),
+        );
+      } else if (dto.service_type === CustomerServiceType.GUARANTEED_RETURNS) {
+        await this.notificationsService.createNotification(
+          buildGuaranteedReturnsApplicationNotification(
+            { customerId: user.sub, customerName: user.username },
+            serviceId,
+          ),
+        );
+      }
+    }
+
     const response: ApplyServiceResponseDto = {
       status: result.status,
       service_type: dto.service_type,
@@ -186,6 +221,18 @@ export class CustomerServicesController {
       serviceId,
       dto,
     );
+
+    // Send notification to admin for top-up request
+    if (result.transaction_id) {
+      await this.notificationsService.createNotification(
+        buildTopUpNotification(
+          { customerId: user.sub, customerName: user.username },
+          result.transaction_id,
+          dto.amount,
+        ),
+      );
+    }
+
     return handleSuccessOne({ data: result, message: 'Top-up successful' });
   }
 
@@ -233,6 +280,35 @@ export class CustomerServicesController {
 
     const result: ApproveServiceResult =
       await this.customersService.approveService(serviceId, user.sub);
+
+    // Send notification to customer for service approval
+    const customerId = result.service.customer_id;
+    if (customerId) {
+      if (
+        result.service.service_type ===
+        CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT
+      ) {
+        await this.notificationsService.createNotification(
+          buildStockAccountApprovalNotification(
+            { customerId },
+            { adminId: user.sub, adminName: user.username },
+            serviceId,
+            true,
+          ),
+        );
+      } else if (
+        result.service.service_type === CustomerServiceType.GUARANTEED_RETURNS
+      ) {
+        await this.notificationsService.createNotification(
+          buildGuaranteedReturnsApprovalNotification(
+            { customerId },
+            { adminId: user.sub, adminName: user.username },
+            serviceId,
+            true,
+          ),
+        );
+      }
+    }
 
     return handleSuccessOne({
       data: {
@@ -302,6 +378,37 @@ export class CustomerServicesController {
         user.sub,
         body.rejection_reason,
       );
+
+    // Send notification to customer for service rejection
+    const customerId = result.service.customer_id;
+    if (customerId) {
+      if (
+        result.service.service_type ===
+        CustomerServiceType.INTERNATIONAL_STOCK_ACCOUNT
+      ) {
+        await this.notificationsService.createNotification(
+          buildStockAccountApprovalNotification(
+            { customerId },
+            { adminId: user.sub, adminName: user.username },
+            serviceId,
+            false,
+            body.rejection_reason,
+          ),
+        );
+      } else if (
+        result.service.service_type === CustomerServiceType.GUARANTEED_RETURNS
+      ) {
+        await this.notificationsService.createNotification(
+          buildGuaranteedReturnsApprovalNotification(
+            { customerId },
+            { adminId: user.sub, adminName: user.username },
+            serviceId,
+            false,
+            body.rejection_reason,
+          ),
+        );
+      }
+    }
 
     return handleSuccessOne({
       data: {
@@ -477,6 +584,17 @@ export class CustomerServicesController {
         dto.package_id,
         dto.payment_slip,
       );
+
+    // Send notification to admin for premium membership application
+    if (result.payment) {
+      await this.notificationsService.createNotification(
+        buildPremiumMembershipApplicationNotification(
+          { customerId: user.sub, customerName: user.username },
+          result.payment.payment_id,
+          Number(dto.payment_slip.payment_amount),
+        ),
+      );
+    }
 
     return handleSuccessOne({
       data: {
@@ -914,6 +1032,11 @@ export class CustomerServicesController {
       user.sub,
       dto.admin_notes,
     );
+
+    // Send notification to customer for payment approval
+    // Note: We'll need to fetch customer info from the service later
+    // For now, the notification is sent via service_id reference
+    // TODO: Enhance this to fetch and include customer details
 
     return handleSuccessOne({
       data: result,

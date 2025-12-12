@@ -21,6 +21,7 @@ import { NodemailerEmailService } from './services/email.service';
 import { PaymentsModule } from '../payments/payments.module';
 import { SubscriptionSchedulerService } from './services/subscription-scheduler.service';
 import { SubscriptionPackagesModule } from '../subscription-packages/subscription-packages.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { SubscriptionPackage } from '../subscription-packages/entities/subscription-package.entity';
 import { getJwtConfig } from '../../config/jwt.config';
 import { ServiceFundTransaction } from './entities/service-fund-transaction.entity';
@@ -47,6 +48,7 @@ import { ServiceFundTransaction } from './entities/service-fund-transaction.enti
     }),
     PaymentsModule,
     SubscriptionPackagesModule,
+    NotificationsModule,
   ],
   controllers: [CustomersController, CustomerServicesController],
   providers: [

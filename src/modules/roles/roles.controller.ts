@@ -196,7 +196,10 @@ export class RolesController {
       id,
       dto.permission_ids,
     );
-    return handleSuccessOne({ data, message: 'Permissions assignment complete' });
+    return handleSuccessOne({
+      data,
+      message: 'Permissions assignment complete',
+    });
   }
 
   @Delete(':id/permissions/bulk')

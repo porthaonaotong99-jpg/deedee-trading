@@ -22,6 +22,8 @@ import {
   handleSuccessPaginated,
 } from '../../../common/utils/response.util';
 import { AuthUser } from '../../../common/decorators/auth-user.decorator';
+import { NotificationsService } from '../../notifications/notifications.service';
+import { buildTopUpApprovalNotification } from '../../notifications/utils/notification-builders';
 import type { JwtPayload } from '../../../common/interfaces';
 import { JwtUserAuthGuard } from '../../auth/guards/jwt-user.guard';
 
@@ -30,7 +32,10 @@ import { JwtUserAuthGuard } from '../../auth/guards/jwt-user.guard';
 @UseGuards(JwtUserAuthGuard)
 @Controller('admin/transfer-history')
 export class AdminTransferHistoryController {
-  constructor(private readonly service: TransferHistoryService) {}
+  constructor(
+    private readonly service: TransferHistoryService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List all transfers (paginated, admin)' })
@@ -140,6 +145,22 @@ export class AdminTransferHistoryController {
       throw new ForbiddenException('Invalid token type for user route');
 
     const data = await this.service.approve(id, user.sub);
+
+    // Send notification to customer for top-up approval
+    const customerId = data.customer_id;
+    const amount = Number(data.amount || 0);
+    if (customerId) {
+      await this.notificationsService.createNotification(
+        buildTopUpApprovalNotification(
+          { customerId },
+          { adminId: user.sub, adminName: user.username },
+          id,
+          amount,
+          true,
+        ),
+      );
+    }
+
     return handleSuccessOne({ data, message: 'Transfer approved' });
   }
 
@@ -154,6 +175,23 @@ export class AdminTransferHistoryController {
       throw new ForbiddenException('Invalid token type for user route');
 
     const data = await this.service.reject(id, user.sub);
+
+    // Send notification to customer for top-up rejection
+    const customerId = data.customer_id;
+    const amount = Number(data.amount || 0);
+    if (customerId) {
+      await this.notificationsService.createNotification(
+        buildTopUpApprovalNotification(
+          { customerId },
+          { adminId: user.sub, adminName: user.username },
+          id,
+          amount,
+          false,
+          'Transfer rejected',
+        ),
+      );
+    }
+
     return handleSuccessOne({ data, message: 'Transfer rejected' });
   }
 }

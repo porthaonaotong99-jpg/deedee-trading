@@ -13,6 +13,7 @@ import { DatabaseInterestRateService } from './database-interest-rate.service';
 import { InterestRateAdminController } from './interest-rate-admin.controller';
 import { NewInvestmentController } from './investment.controller';
 import { InvestmentService } from './investment.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { InvestmentService } from './investment.service';
       CustomerService,
     ]),
     ScheduleModule.forRoot(),
+    NotificationsModule,
   ],
   providers: [
     InvestmentService,

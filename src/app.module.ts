@@ -27,6 +27,7 @@ import { ProvinceModule } from './modules/province/province.module';
 import { DistrictModule } from './modules/district/district.module';
 import { InvestmentInfoModule } from './modules/investment-info/investment-info.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
       useFactory: getDatabaseConfig,
       inject: [ConfigService],
     }),
+    NotificationsModule,
     AuthModule,
     StocksModule,
     InvestTypesModule,

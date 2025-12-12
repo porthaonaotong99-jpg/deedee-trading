@@ -9,6 +9,7 @@ import { CustomerStockPicksController } from './controllers/customer-stock-picks
 import { NodemailerEmailService } from './services/email.service';
 import { StockPick } from './entities/stock-pick.entity';
 import { CustomerStockPick } from './entities/customer-stock-pick.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
   imports: [
     ConfigModule,
@@ -18,6 +19,7 @@ import { CustomerStockPick } from './entities/customer-stock-pick.entity';
       Customer,
       CustomerService,
     ]),
+    NotificationsModule,
   ],
   controllers: [AdminStockPicksController, CustomerStockPicksController],
   providers: [StockPicksService, NodemailerEmailService],

@@ -37,13 +37,18 @@ import {
   handleSuccessOne,
   handleSuccessPaginated,
 } from '../../../common/utils/response.util';
+import { NotificationsService } from '../../notifications/notifications.service';
+import { buildStockPickApprovalNotification } from '../../notifications/utils/notification-builders';
 
 @ApiTags('Admin Stock Picks')
 @Controller('admin/stock-picks')
 @UseGuards(JwtUserAuthGuard)
 @ApiBearerAuth()
 export class AdminStockPicksController {
-  constructor(private readonly stockPicksService: StockPicksService) {}
+  constructor(
+    private readonly stockPicksService: StockPicksService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -305,6 +310,21 @@ export class AdminStockPicksController {
       approveDto,
     );
 
+    // Send notification to customer for stock pick approval/rejection
+    const customerId = result.customer_id;
+    const approved = approveDto.approve !== false;
+    if (customerId) {
+      await this.notificationsService.createNotification(
+        buildStockPickApprovalNotification(
+          { customerId },
+          { adminId: user.sub, adminName: user.username },
+          id,
+          approved,
+          approveDto.admin_response,
+        ),
+      );
+    }
+
     return handleSuccessOne({
       data: result,
       message:
@@ -360,6 +380,20 @@ export class AdminStockPicksController {
         approve: false,
       },
     );
+
+    // Send notification to customer for stock pick rejection
+    const customerId = result.customer_id;
+    if (customerId) {
+      await this.notificationsService.createNotification(
+        buildStockPickApprovalNotification(
+          { customerId },
+          { adminId: user.sub, adminName: user.username },
+          id,
+          false,
+          body.admin_response,
+        ),
+      );
+    }
 
     return handleSuccessOne({
       data: result,

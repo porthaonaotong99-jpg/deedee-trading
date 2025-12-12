@@ -40,6 +40,11 @@ import {
   handleSuccessPaginated,
 } from '../../common/utils/response.util';
 import { InvestmentService } from './investment.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  buildInvestmentRequestNotification,
+  buildInvestmentReturnNotification,
+} from '../notifications/utils/notification-builders';
 // transaction enums are no longer used here; logic moved to service
 
 @ApiTags('investment-requests')
@@ -57,6 +62,7 @@ export class NewInvestmentController {
   constructor(
     private readonly investmentService: InvestmentService,
     private readonly tierService: InterestTierService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // === CUSTOMER ENDPOINTS ===
@@ -157,6 +163,15 @@ export class NewInvestmentController {
       ...dto,
       customer_id: user.sub, // Use authenticated user ID
     });
+
+    // Send notification to admin for new investment request
+    await this.notificationsService.createNotification(
+      buildInvestmentRequestNotification(
+        { customerId: user.sub, customerName: user.username },
+        result.request_id,
+        dto.amount,
+      ),
+    );
 
     return handleSuccessOne({
       data: result,
@@ -339,6 +354,15 @@ export class NewInvestmentController {
       customer_id: user.sub,
     });
 
+    // Send notification to admin for investment return request
+    await this.notificationsService.createNotification(
+      buildInvestmentReturnNotification(
+        { customerId: user.sub, customerName: user.username },
+        result.transaction_id,
+        dto.requested_amount,
+      ),
+    );
+
     return handleSuccessOne({
       data: result,
       message: 'Return request submitted successfully',
@@ -501,6 +525,9 @@ export class NewInvestmentController {
       dto,
     );
 
+    // TODO: Send notification to customer for investment approval
+    // Need to fetch customer_id and amount from the request details
+
     return handleSuccessOne({
       data: result,
       message: 'Investment request approved successfully',
@@ -555,6 +582,9 @@ export class NewInvestmentController {
       user.sub,
       { admin_notes: body.admin_notes },
     );
+
+    // TODO: Send notification to customer for investment rejection
+    // Need to fetch customer details from request
 
     return handleSuccessOne({
       data: result,

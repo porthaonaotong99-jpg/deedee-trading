@@ -4,9 +4,13 @@ import { AdminTransferHistoryController } from './controllers/admin-transfer-his
 import { CustomerTransferHistoryController } from './controllers/customer-transfer-history.controller';
 import { TransferHistoryService } from './transfer-history.service';
 import { TransferHistory } from './entities/transfer-history.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TransferHistory])],
+  imports: [
+    TypeOrmModule.forFeature([TransferHistory]),
+    NotificationsModule,
+  ],
   controllers: [
     AdminTransferHistoryController,
     CustomerTransferHistoryController,
