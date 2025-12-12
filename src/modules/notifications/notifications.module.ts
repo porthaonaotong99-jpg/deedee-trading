@@ -4,12 +4,29 @@ import { NotificationsService } from './notifications.service';
 import { NotificationsGateway } from './notifications.gateway';
 import { AdminNotificationsController } from './notifications.controller';
 import { CustomerNotificationsController } from './customer-notifications.controller';
+import { AdminPendingCountsController } from './admin-pending-counts.controller';
 import { Notification } from './entities/notification.entity';
+import { CustomerService } from '../customers/entities/customer-service.entity';
+import { CustomerStockPick } from '../stock-picks/entities/customer-stock-pick.entity';
+import { TransferHistory } from '../transfer-history/entities/transfer-history.entity';
+import { InvestmentRequest } from '../investment-info/entities/investment-request.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Notification])],
+  imports: [
+    TypeOrmModule.forFeature([
+      Notification,
+      CustomerService,
+      CustomerStockPick,
+      TransferHistory,
+      InvestmentRequest,
+    ]),
+  ],
   providers: [NotificationsService, NotificationsGateway],
-  controllers: [AdminNotificationsController, CustomerNotificationsController],
+  controllers: [
+    AdminNotificationsController,
+    CustomerNotificationsController,
+    AdminPendingCountsController,
+  ],
   exports: [NotificationsService, NotificationsGateway],
 })
 export class NotificationsModule {}
