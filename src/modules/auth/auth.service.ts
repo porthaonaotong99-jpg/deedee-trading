@@ -428,4 +428,106 @@ export class AuthService {
     const count = await this.sessionsService.revokeAll(customerId);
     return { revoked: count };
   }
+
+  // ============ Admin Profile Management ============
+
+  async getAdminProfile(userId: string) {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['role'],
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    return {
+      id: user.id,
+      username: user.username,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      tel: user.tel,
+      gender: user.gender,
+      address: user.address,
+      status: user.status,
+      profile: user.profile,
+      role: user.role?.name || undefined,
+      role_id: user.role_id,
+      created_at: user.created_at,
+      updated_at: user.updated_at,
+    };
+  }
+
+  async updateAdminProfile(
+    userId: string,
+    updateDto: {
+      first_name?: string;
+      last_name?: string;
+      tel?: string;
+      address?: string;
+    },
+  ) {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // Update only provided fields
+    if (updateDto.first_name !== undefined) {
+      user.first_name = updateDto.first_name;
+    }
+    if (updateDto.last_name !== undefined) {
+      user.last_name = updateDto.last_name;
+    }
+    if (updateDto.tel !== undefined) {
+      user.tel = updateDto.tel;
+    }
+    if (updateDto.address !== undefined) {
+      user.address = updateDto.address;
+    }
+
+    await this.userRepository.save(user);
+
+    return this.getAdminProfile(userId);
+  }
+
+  async changeAdminPassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // Verify current password
+    const passwordValid = await this.verifyPassword(
+      currentPassword,
+      user.password,
+    );
+
+    if (!passwordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    // Hash new password with argon2
+    const hashedPassword = await argon2Hash(newPassword, {
+      type: argon2id,
+      memoryCost: 65536,
+      timeCost: 3,
+      parallelism: 4,
+    });
+
+    user.password = hashedPassword;
+    await this.userRepository.save(user);
+
+    return { message: 'Password changed successfully' };
+  }
 }

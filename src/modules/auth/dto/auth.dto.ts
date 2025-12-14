@@ -112,3 +112,44 @@ export class LoginResponseDto {
     email?: string;
   };
 }
+
+// Admin Profile DTOs
+export class UpdateProfileDto {
+  @ApiPropertyOptional({ example: 'John', description: 'First name' })
+  @IsString()
+  @IsOptional()
+  first_name?: string;
+
+  @ApiPropertyOptional({ example: 'Doe', description: 'Last name' })
+  @IsString()
+  @IsOptional()
+  last_name?: string;
+
+  @ApiPropertyOptional({ example: '+1234567890', description: 'Phone number' })
+  @IsString()
+  @IsOptional()
+  tel?: string;
+
+  @ApiPropertyOptional({ example: '123 Main St', description: 'Address' })
+  @IsString()
+  @IsOptional()
+  address?: string;
+}
+
+export class ChangePasswordDto {
+  @ApiProperty({ example: 'OldP@ss123', description: 'Current password' })
+  @IsString()
+  @IsNotEmpty()
+  current_password!: string;
+
+  @ApiProperty({ example: 'NewP@ss456', description: 'New password (min 6 chars)' })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(6)
+  new_password!: string;
+
+  @ApiProperty({ example: 'NewP@ss456', description: 'Confirm new password' })
+  @IsString()
+  @IsNotEmpty()
+  confirm_password!: string;
+}

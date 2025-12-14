@@ -5,8 +5,10 @@ import {
   ValidationPipe,
   Get,
   Param,
+  Patch,
   Req,
   UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -24,7 +26,13 @@ import {
   AuthLoginCustomerResponseExample,
 } from '../../docs/swagger';
 import { AuthService } from './auth.service';
-import { LoginDto, CustomerLoginDto, LoginResponseDto } from './dto/auth.dto';
+import {
+  LoginDto,
+  CustomerLoginDto,
+  LoginResponseDto,
+  UpdateProfileDto,
+  ChangePasswordDto,
+} from './dto/auth.dto';
 import {
   CustomerRegisterDto,
   CustomerRegisterResponseDto,
@@ -301,6 +309,126 @@ export class AuthController {
     return handleSuccessOne({
       data: { success: true },
       message: 'Logout successful',
+      statusCode: 200,
+    });
+  }
+
+  // ============ Admin Profile Management ============
+
+  @Get('profile')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current admin/user profile' })
+  @ApiResponse({
+    status: 200,
+    description: 'Profile retrieved successfully',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized',
+  })
+  async getProfile(
+    @Req()
+    req: {
+      user?: { sub: string; username: string; roleId: string; type: string };
+    },
+  ) {
+    const userId = req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    const data = await this.authService.getAdminProfile(userId);
+    return handleSuccessOne({
+      data,
+      message: 'Profile retrieved successfully',
+      statusCode: 200,
+    });
+  }
+
+  @Patch('profile')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update current admin/user profile' })
+  @ApiBody({
+    description: 'Profile update payload',
+    schema: {
+      type: 'object',
+      properties: {
+        first_name: { type: 'string' },
+        last_name: { type: 'string' },
+        tel: { type: 'string' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Profile updated successfully',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized',
+  })
+  async updateProfile(
+    @Req()
+    req: {
+      user?: { sub: string; username: string; roleId: string; type: string };
+    },
+    @Body(ValidationPipe) updateDto: UpdateProfileDto,
+  ) {
+    const userId = req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    const data = await this.authService.updateAdminProfile(userId, updateDto);
+    return handleSuccessOne({
+      data,
+      message: 'Profile updated successfully',
+      statusCode: 200,
+    });
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change current admin/user password' })
+  @ApiBody({
+    description: 'Password change payload',
+    schema: {
+      type: 'object',
+      properties: {
+        current_password: { type: 'string' },
+        new_password: { type: 'string' },
+      },
+      required: ['current_password', 'new_password'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Password changed successfully',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Current password is incorrect or unauthorized',
+  })
+  async changePassword(
+    @Req()
+    req: {
+      user?: { sub: string; username: string; roleId: string; type: string };
+    },
+    @Body(ValidationPipe) changeDto: ChangePasswordDto,
+  ) {
+    const userId = req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    const data = await this.authService.changeAdminPassword(
+      userId,
+      changeDto.current_password,
+      changeDto.new_password,
+    );
+    return handleSuccessOne({
+      data,
+      message: 'Password changed successfully',
       statusCode: 200,
     });
   }
