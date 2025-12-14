@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, FindOptionsWhere } from 'typeorm';
 import { CustomerStock } from './entities/customer-stock.entity';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { AdminCustomerStockQueryDto } from './dto/admin-customer-stock-query.dto';
 
 @Injectable()
 export class CustomerStocksService {
@@ -16,6 +17,30 @@ export class CustomerStocksService {
     const limit =
       query.limit && query.limit > 0 ? Math.min(query.limit, 100) : 10;
     const [data, total] = await this.repo.findAndCount({
+      relations: ['customer', 'stock'],
+      take: limit,
+      skip: (page - 1) * limit,
+      order: { created_at: 'DESC' },
+    });
+    const totalPages = Math.ceil(total / limit) || 1;
+    return { data, total, page, limit, totalPages };
+  }
+
+  async findAllAdmin(query: AdminCustomerStockQueryDto) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit =
+      query.limit && query.limit > 0 ? Math.min(query.limit, 100) : 10;
+
+    const where: FindOptionsWhere<CustomerStock> = {};
+    if (query.customer_id) {
+      where.customer_id = query.customer_id;
+    }
+    if (query.stock_id) {
+      where.stock_id = query.stock_id;
+    }
+
+    const [data, total] = await this.repo.findAndCount({
+      where,
       relations: ['customer', 'stock'],
       take: limit,
       skip: (page - 1) * limit,

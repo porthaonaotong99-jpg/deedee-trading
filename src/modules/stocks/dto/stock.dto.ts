@@ -79,12 +79,142 @@ export class StockResponseDto {
     description: 'Stock UUID',
   })
   id: string;
+
   @ApiProperty({ example: 'Apple Inc.', description: 'Stock name' })
   name: string;
+
   @ApiProperty({ example: 'AAPL', description: 'Ticker symbol' })
   symbol: string;
+
+  @ApiPropertyOptional({ example: 'USD', description: 'Currency' })
+  currency?: string;
+
+  @ApiPropertyOptional({ example: 'NASDAQ', description: 'Exchange' })
+  exchange?: string;
+
+  @ApiPropertyOptional({ example: 'NASDAQ', description: 'Primary exchange' })
+  primary_exchange?: string;
+
+  @ApiPropertyOptional({ example: 'STK', description: 'Security type' })
+  security_type?: string;
+
+  @ApiPropertyOptional({ example: 'Apple Inc.', description: 'Company name' })
+  company?: string;
+
+  @ApiPropertyOptional({ example: 'USA', description: 'Country' })
+  country?: string;
+
+  @ApiPropertyOptional({
+    example: 'Apple designs, manufactures, and markets smartphones...',
+    description: 'Description',
+  })
+  description?: string;
+
+  @ApiPropertyOptional({ example: 'Consumer Electronics', description: 'Industry' })
+  industry?: string;
+
+  @ApiPropertyOptional({ example: 'Technology', description: 'Sector' })
+  sector?: string;
+
+  @ApiPropertyOptional({ example: 2800000000000, description: 'Market capitalization' })
+  market_cap?: number;
+
+  @ApiPropertyOptional({ example: 15400000000, description: 'Shares outstanding' })
+  shares_outstanding?: number;
+
+  // Real-time Price Data
   @ApiProperty({ example: 175.34, description: 'Last price' })
   last_price: number;
+
+  @ApiPropertyOptional({ example: 173.5, description: 'Previous close price' })
+  previous_close?: number;
+
+  @ApiPropertyOptional({ example: 174.0, description: 'Open price' })
+  open_price?: number;
+
+  @ApiPropertyOptional({ example: 175.0, description: 'Bid price' })
+  bid_price?: number;
+
+  @ApiPropertyOptional({ example: 175.1, description: 'Ask price' })
+  ask_price?: number;
+
+  @ApiPropertyOptional({ example: 100, description: 'Bid size' })
+  bid_size?: number;
+
+  @ApiPropertyOptional({ example: 200, description: 'Ask size' })
+  ask_size?: number;
+
+  @ApiPropertyOptional({ example: 176.5, description: 'High price of the day' })
+  high_price?: number;
+
+  @ApiPropertyOptional({ example: 172.0, description: 'Low price of the day' })
+  low_price?: number;
+
+  @ApiPropertyOptional({ example: 52300000, description: 'Volume traded' })
+  volume?: number;
+
+  @ApiPropertyOptional({ example: 1.84, description: 'Price change' })
+  change?: number;
+
+  @ApiPropertyOptional({ example: 1.06, description: 'Percentage change' })
+  change_percent?: number;
+
+  // Trading Information
+  @ApiPropertyOptional({ example: 0.01, description: 'Minimum tick' })
+  min_tick?: number;
+
+  @ApiPropertyOptional({ example: 1, description: 'Minimum order size' })
+  min_size?: number;
+
+  @ApiPropertyOptional({ example: true, description: 'Is tradable' })
+  is_tradable?: boolean;
+
+  @ApiPropertyOptional({ example: true, description: 'Is active' })
+  is_active?: boolean;
+
+  // Market Hours & Status
+  @ApiPropertyOptional({ example: 'OPEN', description: 'Market status' })
+  market_status?: string;
+
+  @ApiPropertyOptional({ example: '09:30:00', description: 'Market open time' })
+  market_open_time?: string;
+
+  @ApiPropertyOptional({ example: '16:00:00', description: 'Market close time' })
+  market_close_time?: string;
+
+  // Timestamps
+  @ApiPropertyOptional({ description: 'Last price update' })
+  last_price_update?: Date;
+
+  @ApiPropertyOptional({ description: 'Last trade time' })
+  last_trade_time?: Date;
+
+  // Fundamental Data
+  @ApiPropertyOptional({ example: 29.5, description: 'P/E ratio' })
+  pe_ratio?: number;
+
+  @ApiPropertyOptional({ example: 0.52, description: 'Dividend yield' })
+  dividend_yield?: number;
+
+  @ApiPropertyOptional({ example: 5.89, description: 'Earnings per share' })
+  eps?: number;
+
+  @ApiPropertyOptional({ example: 199.62, description: '52-week high' })
+  week_52_high?: number;
+
+  @ApiPropertyOptional({ example: 124.17, description: '52-week low' })
+  week_52_low?: number;
+
+  // Data Source
+  @ApiPropertyOptional({ example: 'FMP', description: 'Data source provider' })
+  data_source?: string;
+
+  @ApiPropertyOptional({ example: 'REAL_TIME', description: 'Data type' })
+  data_type?: string;
+
+  @ApiPropertyOptional({ example: 15, description: 'Data delay in minutes' })
+  data_delay_minutes?: number;
+
   @ApiPropertyOptional({
     example: StockCategoryEmbeddedExample,
     description: 'Category object if related category is loaded',
@@ -93,11 +223,13 @@ export class StockResponseDto {
     id: string;
     name: string;
   };
+
   @ApiProperty({
     example: '2025-01-01T10:00:00.000Z',
     description: 'Creation timestamp',
   })
   created_at: Date;
+
   @ApiProperty({
     example: '2025-01-05T12:00:00.000Z',
     description: 'Last update timestamp',

@@ -16,8 +16,11 @@ import {
 } from '@nestjs/swagger';
 import { CustomerStocksService } from './customer-stocks.service';
 import { JwtCustomerAuthGuard } from '../auth/guards/jwt-customer.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../../common/decorators/permissions.decorator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { AdminCustomerStockQueryDto } from './dto/admin-customer-stock-query.dto';
 import { AuthUser } from '../../common/decorators/auth-user.decorator';
 import type { JwtPayload } from '../../common/interfaces';
 import {
@@ -30,6 +33,44 @@ import {
 @Controller('customer-stocks')
 export class CustomerStocksController {
   constructor(private readonly service: CustomerStocksService) {}
+
+  // ============================================================================
+  // Admin Routes (for admin panel)
+  // ============================================================================
+
+  @Get('admin/all')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('customer-stocks:read')
+  @ApiOperation({ summary: 'List all customer stock holdings (admin)' })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'customer_id', required: false })
+  @ApiQuery({ name: 'stock_id', required: false })
+  async findAllAdmin(@Query() query: AdminCustomerStockQueryDto) {
+    const result = await this.service.findAllAdmin(query);
+    return handleSuccessPaginated({
+      data: result.data,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      message: 'CustomerStocks fetched',
+    });
+  }
+
+  @Get('admin/:id')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('customer-stocks:read')
+  @ApiOperation({ summary: 'Get customer stock holding by id (admin)' })
+  @ApiResponse({ status: 200 })
+  async findOneAdmin(@Param('id', ParseUUIDPipe) id: string) {
+    const data = await this.service.findOne(id);
+    return handleSuccessOne({ data, message: 'CustomerStock found' });
+  }
+
+  // ============================================================================
+  // Customer Routes (for customer app)
+  // ============================================================================
 
   @Get()
   @UseGuards(JwtCustomerAuthGuard)

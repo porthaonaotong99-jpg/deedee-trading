@@ -3,7 +3,6 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, MoreThan, Not } from 'typeorm';
 import { StockPick } from '../entities/stock-pick.entity';
@@ -28,7 +27,6 @@ import {
   PaginationUtil,
   PaginatedResult,
 } from '../../../common/utils/pagination.util';
-
 import { NodemailerEmailService } from './email.service';
 
 export interface StockPickEmailData {
@@ -40,6 +38,23 @@ export interface StockPickEmailData {
   targetPrice?: number;
   currentPrice?: number;
 }
+
+// Status label mapping
+const STATUS_LABELS: Record<CustomerPickStatus, string> = {
+  [CustomerPickStatus.SELECTED]: 'Selected',
+  [CustomerPickStatus.PAYMENT_SUBMITTED]: 'Payment Submitted',
+  [CustomerPickStatus.APPROVED]: 'Approved',
+  [CustomerPickStatus.REJECTED]: 'Rejected',
+  [CustomerPickStatus.EMAIL_SENT]: 'Email Sent',
+};
+
+// Recommendation title case mapping
+const RECOMMENDATION_MAP: Record<string, string> = {
+  buy: 'Buy',
+  hold: 'Hold',
+  strong_buy: 'Strong Buy',
+  sell: 'Sell',
+};
 
 @Injectable()
 export class StockPicksService {
@@ -56,7 +71,68 @@ export class StockPicksService {
     private readonly emailService: NodemailerEmailService,
   ) {}
 
-  // Admin methods
+  // ============== Helper Methods ==============
+
+  private toNumber(value: unknown): number | undefined {
+    if (value === null || value === undefined) return undefined;
+    const n = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(n) ? n : undefined;
+  }
+
+  private formatMoney(val?: number): string | undefined {
+    return typeof val === 'number' && Number.isFinite(val)
+      ? `$${val.toFixed(2)}`
+      : undefined;
+  }
+
+  private formatPercent(val?: number): string | undefined {
+    return typeof val === 'number'
+      ? `${val >= 0 ? '+' : ''}${val.toFixed(1)}%`
+      : undefined;
+  }
+
+  private formatDate(d?: Date | null): string | undefined {
+    if (!d) return undefined;
+    try {
+      return new Date(d).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
+  private toTitleCase(str?: string | null): string {
+    if (!str) return 'N/A';
+    return str
+      .split('_')
+      .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+      .join(' ');
+  }
+
+  private parseDateParam(val?: string, endOfDay = false): Date | undefined {
+    if (!val) return undefined;
+    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(val);
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return undefined;
+    if (isDateOnly) {
+      if (endOfDay) {
+        d.setHours(23, 59, 59, 999);
+      } else {
+        d.setHours(0, 0, 0, 0);
+      }
+    }
+    return d;
+  }
+
+  private getCustomerFullName(customer: Customer): string {
+    return `${customer.first_name} ${customer.last_name || ''}`.trim();
+  }
+
+  // ============== Admin Methods ==============
+
   async createStockPick(
     createDto: CreateStockPickDto,
     adminUserId: string,
@@ -66,9 +142,8 @@ export class StockPicksService {
       created_by_admin_id: adminUserId,
       expires_at: createDto.expires_at ? new Date(createDto.expires_at) : null,
     });
-
-    const savedPick = await this.stockPickRepo.save(stockPick);
-    return this.mapToResponseDto(savedPick);
+    const saved = await this.stockPickRepo.save(stockPick);
+    return this.mapToResponseDto(saved);
   }
 
   async getAllStockPicks(
@@ -81,34 +156,43 @@ export class StockPicksService {
       maxLimit: 100,
     });
 
-    const queryBuilder = this.stockPickRepo.createQueryBuilder('pick');
+    const qb = this.stockPickRepo.createQueryBuilder('pick');
 
-    // Apply filters
-    if (filterDto.service_type) {
-      queryBuilder.andWhere('pick.service_type = :serviceType', {
-        serviceType: filterDto.service_type,
-      });
-    }
-    if (filterDto.status) {
-      queryBuilder.andWhere('pick.status = :status', {
-        status: filterDto.status,
-      });
-    }
-    if (filterDto.availability) {
-      queryBuilder.andWhere('pick.availability = :availability', {
-        availability: filterDto.availability,
-      });
-    }
-    if (filterDto.is_active !== undefined) {
-      queryBuilder.andWhere('pick.is_active = :isActive', {
-        isActive: filterDto.is_active,
-      });
-    }
+    // Apply filters using object mapping for cleaner code
+    const filters: Array<{
+      condition: boolean;
+      clause: string;
+      params: Record<string, unknown>;
+    }> = [
+      {
+        condition: !!filterDto.service_type,
+        clause: 'pick.service_type = :serviceType',
+        params: { serviceType: filterDto.service_type },
+      },
+      {
+        condition: !!filterDto.status,
+        clause: 'pick.status = :status',
+        params: { status: filterDto.status },
+      },
+      {
+        condition: !!filterDto.availability,
+        clause: 'pick.availability = :availability',
+        params: { availability: filterDto.availability },
+      },
+      {
+        condition: filterDto.is_active !== undefined,
+        clause: 'pick.is_active = :isActive',
+        params: { isActive: filterDto.is_active },
+      },
+    ];
 
-    queryBuilder.orderBy('pick.created_at', 'DESC').skip(skip).take(limit);
+    filters
+      .filter((f) => f.condition)
+      .forEach((f) => qb.andWhere(f.clause, f.params));
 
-    const [data, total] = await queryBuilder.getManyAndCount();
+    qb.orderBy('pick.created_at', 'DESC').skip(skip).take(limit);
 
+    const [data, total] = await qb.getManyAndCount();
     const mappedData = data.map((pick) => this.mapToResponseDto(pick));
 
     return PaginationUtil.createPaginatedResult(mappedData, total, {
@@ -129,14 +213,12 @@ export class StockPicksService {
       throw new NotFoundException('Stock pick not found');
     }
 
-    const updateData = {
+    await this.stockPickRepo.update(pickId, {
       ...updateDto,
       expires_at: updateDto.expires_at
         ? new Date(updateDto.expires_at)
         : existingPick.expires_at,
-    };
-
-    await this.stockPickRepo.update(pickId, updateData);
+    });
 
     const updatedPick = await this.stockPickRepo.findOne({
       where: { id: pickId },
@@ -152,7 +234,8 @@ export class StockPicksService {
     }
   }
 
-  // Customer methods
+  // ============== Customer Methods ==============
+
   async getAvailablePicksForCustomer(
     customerId: string | null,
     filterDto: StockPickFilterDto,
@@ -164,71 +247,52 @@ export class StockPicksService {
       maxLimit: 50,
     });
 
-    const queryBuilder = this.stockPickRepo.createQueryBuilder('pick');
+    const qb = this.stockPickRepo.createQueryBuilder('pick');
 
-    // Apply filters if provided
+    // Base filters
     if (filterDto.availability) {
-      queryBuilder.andWhere('pick.availability = :availability', {
+      qb.andWhere('pick.availability = :availability', {
         availability: filterDto.availability,
       });
     }
-
     if (filterDto.is_active !== undefined) {
-      queryBuilder.andWhere('pick.is_active = :isActive', {
+      qb.andWhere('pick.is_active = :isActive', {
         isActive: filterDto.is_active,
       });
     }
 
     // Exclude expired picks
-    queryBuilder.andWhere(
-      '(pick.expires_at IS NULL OR pick.expires_at > :now)',
-      { now: new Date() },
-    );
+    qb.andWhere('(pick.expires_at IS NULL OR pick.expires_at > :now)', {
+      now: new Date(),
+    });
 
-    // Apply optional customer filters (risk, sector, expected return range, time horizon)
+    // Optional filters
     if (filterDto.risk_level) {
-      queryBuilder.andWhere('pick.risk_level = :riskLevel', {
+      qb.andWhere('pick.risk_level = :riskLevel', {
         riskLevel: filterDto.risk_level,
       });
     }
     if (filterDto.sector) {
-      // Case-insensitive partial match using ILIKE (PostgreSQL)
-      queryBuilder.andWhere('pick.sector ILIKE :sector', {
+      qb.andWhere('pick.sector ILIKE :sector', {
         sector: `%${filterDto.sector}%`,
       });
     }
-    // Created_at date range filter (inclusive)
-    const parseDateParam = (
-      val?: string,
-      endOfDay = false,
-    ): Date | undefined => {
-      if (!val) return undefined;
-      const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(val);
-      const d = new Date(val);
-      if (isNaN(d.getTime())) return undefined;
-      if (isDateOnly) {
-        if (endOfDay) d.setHours(23, 59, 59, 999);
-        else d.setHours(0, 0, 0, 0);
-      }
-      return d;
-    };
 
-    const createdStart = parseDateParam(filterDto.start_date);
-    const createdEnd = parseDateParam(filterDto.end_date, true);
-    if (createdStart && createdEnd && createdStart > createdEnd) {
+    // Date range filter
+    const startDate = this.parseDateParam(filterDto.start_date);
+    const endDate = this.parseDateParam(filterDto.end_date, true);
+
+    if (startDate && endDate && startDate > endDate) {
       throw new BadRequestException('start_date cannot be after end_date');
     }
-    if (createdStart) {
-      queryBuilder.andWhere('pick.created_at >= :startDate', {
-        startDate: createdStart,
-      });
+    if (startDate) {
+      qb.andWhere('pick.created_at >= :startDate', { startDate });
     }
-    if (createdEnd) {
-      queryBuilder.andWhere('pick.created_at <= :endDate', {
-        endDate: createdEnd,
-      });
+    if (endDate) {
+      qb.andWhere('pick.created_at <= :endDate', { endDate });
     }
-    // Percent overlap logic: ranges overlap if minA <= maxB AND maxA >= minB
+
+    // Expected return percent overlap filter
     if (
       filterDto.min_expected_return_percent !== undefined ||
       filterDto.max_expected_return_percent !== undefined
@@ -237,13 +301,13 @@ export class StockPicksService {
         filterDto.min_expected_return_percent ?? Number.NEGATIVE_INFINITY;
       const maxPct =
         filterDto.max_expected_return_percent ?? Number.POSITIVE_INFINITY;
-      // Only apply when we have at least one bound
-      queryBuilder.andWhere(
+      qb.andWhere(
         '((pick.expected_return_min_percent IS NULL AND pick.expected_return_max_percent IS NULL) OR (pick.expected_return_min_percent <= :maxPct AND pick.expected_return_max_percent >= :minPct))',
         { minPct, maxPct },
       );
     }
-    // Time horizon overlap logic similar to percent
+
+    // Time horizon overlap filter
     if (
       filterDto.min_time_horizon_months !== undefined ||
       filterDto.max_time_horizon_months !== undefined
@@ -252,29 +316,33 @@ export class StockPicksService {
         filterDto.min_time_horizon_months ?? Number.NEGATIVE_INFINITY;
       const maxMonths =
         filterDto.max_time_horizon_months ?? Number.POSITIVE_INFINITY;
-      queryBuilder.andWhere(
+      qb.andWhere(
         '((pick.time_horizon_min_months IS NULL AND pick.time_horizon_max_months IS NULL) OR (pick.time_horizon_min_months <= :maxMonths AND pick.time_horizon_max_months >= :minMonths))',
         { minMonths, maxMonths },
       );
     }
 
-    queryBuilder.orderBy('pick.created_at', 'DESC').skip(skip).take(limit);
+    qb.orderBy('pick.created_at', 'DESC').skip(skip).take(limit);
 
-    const [data, total] = await queryBuilder.getManyAndCount();
+    // Execute queries in parallel
+    const [queryResult, customerSelections] = await Promise.all([
+      qb.getManyAndCount(),
+      customerId
+        ? this.customerPickRepo.find({
+            where: { customer_id: customerId },
+            select: ['stock_pick_id', 'status'],
+          })
+        : Promise.resolve([]),
+    ]);
 
-    // Fetch customer's non-rejected selections for quick lookup (only if authenticated)
-    let selectedSet = new Set<string>();
-    if (customerId) {
-      const customerSelections = await this.customerPickRepo.find({
-        where: { customer_id: customerId },
-        select: ['stock_pick_id', 'status'],
-      });
-      selectedSet = new Set(
-        customerSelections
-          .filter((s) => s.status !== CustomerPickStatus.REJECTED)
-          .map((s) => s.stock_pick_id),
-      );
-    }
+    const [data, total] = queryResult;
+
+    // Build selected set (exclude rejected)
+    const selectedSet = new Set(
+      customerSelections
+        .filter((s) => s.status !== CustomerPickStatus.REJECTED)
+        .map((s) => s.stock_pick_id),
+    );
 
     const mappedData = data.map((pick) =>
       this.mapToCustomerViewDto(pick, selectedSet.has(pick.id)),
@@ -338,23 +406,14 @@ export class StockPicksService {
       maxLimit: 50,
     });
 
-    // Use query builder to support approved_at range filtering
     const qb = this.customerPickRepo
       .createQueryBuilder('cp')
       .leftJoinAndSelect('cp.stock_pick', 'sp')
       .where('cp.customer_id = :cid', { cid: customerId });
 
     if (startDate || endDate) {
-      // When filtering by approved_at, only consider approved picks
-      // qb.andWhere('cp.status = :approved', {
-      //   approved: CustomerPickStatus.APPROVED,
-      // });
-      if (startDate) {
-        qb.andWhere('cp.approved_at >= :startDate', { startDate });
-      }
-      if (endDate) {
-        qb.andWhere('cp.approved_at <= :endDate', { endDate });
-      }
+      if (startDate) qb.andWhere('cp.approved_at >= :startDate', { startDate });
+      if (endDate) qb.andWhere('cp.approved_at <= :endDate', { endDate });
       qb.orderBy('cp.approved_at', 'DESC');
     } else {
       qb.orderBy('cp.selected_at', 'DESC');
@@ -363,7 +422,6 @@ export class StockPicksService {
     qb.skip(skip).take(validLimit);
 
     const [data, total] = await qb.getManyAndCount();
-
     const mappedData = data.map((pick) =>
       this.mapToCustomerMySelectionItem(pick),
     );
@@ -374,7 +432,8 @@ export class StockPicksService {
     });
   }
 
-  // Payment slip methods
+  // ============== Payment Methods ==============
+
   async submitPaymentSlip(
     customerId: string,
     stockPickId: string,
@@ -384,7 +443,7 @@ export class StockPicksService {
       const stockPickRepo = manager.getRepository(StockPick);
       const customerPickRepo = manager.getRepository(CustomerStockPick);
 
-      // 1. Validate stock pick exists & is active / not expired
+      // Validate stock pick
       const stockPick = await stockPickRepo.findOne({
         where: {
           id: stockPickId,
@@ -392,6 +451,7 @@ export class StockPicksService {
           expires_at: MoreThan(new Date()),
         },
       });
+
       if (!stockPick) {
         throw new NotFoundException('Stock pick not found');
       }
@@ -402,7 +462,7 @@ export class StockPicksService {
         throw new BadRequestException('Stock pick has expired');
       }
 
-      // 2. Enforce single submission per customer per stock pick (pending or approved etc.)
+      // Check for existing submission
       const existing = await customerPickRepo.findOne({
         where: {
           customer_id: customerId,
@@ -410,13 +470,15 @@ export class StockPicksService {
           status: Not(CustomerPickStatus.REJECTED),
         },
       });
+
       if (existing) {
         throw new BadRequestException(
           'You already submitted for this stock pick',
         );
       }
 
-      // 3. Create new CustomerStockPick with payment slip data
+      // Create customer pick
+      const currentPrice = this.toNumber(stockPick.current_price);
       const pickEntity = customerPickRepo.create({
         customer_id: customerId,
         stock_pick_id: stockPickId,
@@ -427,18 +489,11 @@ export class StockPicksService {
         payment_reference: paymentSlipDto.payment_reference || null,
         customer_notes: paymentSlipDto.payment_notes || null,
         payment_submitted_at: new Date(),
-        // Capture snapshot price at selection/submission time
-        selected_price:
-          typeof stockPick.current_price === 'number'
-            ? stockPick.current_price
-            : stockPick.current_price !== null
-              ? Number(stockPick.current_price)
-              : null,
+        selected_price: currentPrice ?? null,
         selected_at: new Date(),
       });
-      const saved = await customerPickRepo.save(pickEntity);
 
-      // 4. Reload with relations for response shaping (symbol hidden until approved logic is preserved)
+      const saved = await customerPickRepo.save(pickEntity);
       const full = await customerPickRepo.findOne({
         where: { id: saved.id },
         relations: ['stock_pick'],
@@ -448,7 +503,7 @@ export class StockPicksService {
     });
   }
 
-  // Admin approval methods
+  // ============== Admin Approval Methods ==============
 
   async getPendingApprovals(
     page = 1,
@@ -474,72 +529,19 @@ export class StockPicksService {
       maxLimit: 100,
     });
 
-    const queryBuilder = this.customerPickRepo
+    const qb = this.customerPickRepo
       .createQueryBuilder('cp')
       .leftJoinAndSelect('cp.stock_pick', 'sp')
       .leftJoinAndSelect('cp.customer', 'c');
 
-    // Apply status filter if provided, otherwise default to payment_submitted
     if (status) {
-      queryBuilder.where('cp.status = :status', { status });
+      qb.where('cp.status = :status', { status });
     }
 
-    queryBuilder
-      .orderBy('cp.payment_submitted_at', 'ASC')
-      .skip(skip)
-      .take(validLimit);
+    qb.orderBy('cp.payment_submitted_at', 'ASC').skip(skip).take(validLimit);
 
-    const [data, total] = await queryBuilder.getManyAndCount();
-
-    const mappedData = data.map((pick) => {
-      const baseDto = this.mapToCustomerPickResponseDto(pick);
-      return {
-        ...baseDto,
-        customer_email: pick.customer.email,
-        customer_name: `${pick.customer.first_name} ${pick.customer.last_name}`,
-        stock_symbol: pick.stock_pick.stock_symbol,
-        customer: {
-          id: pick.customer.id,
-          first_name: pick.customer.first_name,
-          last_name: pick.customer.last_name,
-          email: pick.customer.email,
-        },
-        stock_pick: {
-          id: pick.stock_pick.id,
-          stock_symbol: pick.stock_pick.stock_symbol,
-          company: pick.stock_pick.company,
-          description: pick.stock_pick.description,
-          service_type: pick.stock_pick.service_type,
-          current_price: pick.stock_pick.current_price
-            ? Number(pick.stock_pick.current_price)
-            : null,
-          target_price: pick.stock_pick.target_price
-            ? Number(pick.stock_pick.target_price)
-            : null,
-          sale_price: pick.stock_pick.sale_price
-            ? Number(pick.stock_pick.sale_price)
-            : 0,
-          status: pick.stock_pick.status,
-          availability: pick.stock_pick.availability,
-          risk_level: pick.stock_pick.risk_level,
-          recommendation: pick.stock_pick.recommendation,
-          expected_return_min_percent: pick.stock_pick
-            .expected_return_min_percent
-            ? Number(pick.stock_pick.expected_return_min_percent)
-            : null,
-          expected_return_max_percent: pick.stock_pick
-            .expected_return_max_percent
-            ? Number(pick.stock_pick.expected_return_max_percent)
-            : null,
-          time_horizon_min_months: pick.stock_pick.time_horizon_min_months,
-          time_horizon_max_months: pick.stock_pick.time_horizon_max_months,
-          sector: pick.stock_pick.sector,
-          analyst_name: pick.stock_pick.analyst_name,
-          admin_notes: pick.stock_pick.admin_notes,
-          created_at: pick.stock_pick.created_at,
-        },
-      };
-    });
+    const [data, total] = await qb.getManyAndCount();
+    const mappedData = data.map((pick) => this.mapToAdminPickDetail(pick));
 
     return PaginationUtil.createPaginatedResult(mappedData, total, {
       page: validPage,
@@ -547,42 +549,7 @@ export class StockPicksService {
     });
   }
 
-  async getCustomerPickById(customerPickId: string): Promise<
-    CustomerStockPickResponseDto & {
-      customer_email: string;
-      customer_name: string;
-      stock_symbol: string;
-      selected_price: number | null;
-      customer: {
-        id: string;
-        first_name: string;
-        last_name: string;
-        email: string;
-      };
-      stock_pick: {
-        id: string;
-        stock_symbol: string;
-        company: string | null;
-        description: string;
-        service_type: string;
-        current_price: number | null;
-        target_price: number | null;
-        sale_price: number;
-        status: string;
-        availability: string;
-        risk_level: string | null;
-        recommendation: string | null;
-        expected_return_min_percent: number | null;
-        expected_return_max_percent: number | null;
-        time_horizon_min_months: number | null;
-        time_horizon_max_months: number | null;
-        sector: string | null;
-        analyst_name: string | null;
-        admin_notes: string | null;
-        created_at: Date;
-      };
-    }
-  > {
+  async getCustomerPickById(customerPickId: string) {
     const customerPick = await this.customerPickRepo.findOne({
       where: { id: customerPickId },
       relations: ['customer', 'stock_pick'],
@@ -593,55 +560,8 @@ export class StockPicksService {
     }
 
     return {
-      ...this.mapToCustomerPickResponseDto(customerPick),
-      customer_email: customerPick.customer.email,
-      customer_name: `${customerPick.customer.first_name} ${customerPick.customer.last_name}`,
-      stock_symbol: customerPick.stock_pick.stock_symbol,
-      customer: {
-        id: customerPick.customer.id,
-        first_name: customerPick.customer.first_name,
-        last_name: customerPick.customer.last_name,
-        email: customerPick.customer.email,
-      },
-      stock_pick: {
-        id: customerPick.stock_pick.id,
-        stock_symbol: customerPick.stock_pick.stock_symbol,
-        company: customerPick.stock_pick.company,
-        description: customerPick.stock_pick.description,
-        service_type: customerPick.stock_pick.service_type,
-        current_price: customerPick.stock_pick.current_price
-          ? Number(customerPick.stock_pick.current_price)
-          : null,
-        target_price: customerPick.stock_pick.target_price
-          ? Number(customerPick.stock_pick.target_price)
-          : null,
-        sale_price: customerPick.stock_pick.sale_price
-          ? Number(customerPick.stock_pick.sale_price)
-          : 0,
-        status: customerPick.stock_pick.status,
-        availability: customerPick.stock_pick.availability,
-        risk_level: customerPick.stock_pick.risk_level,
-        recommendation: customerPick.stock_pick.recommendation,
-        expected_return_min_percent: customerPick.stock_pick
-          .expected_return_min_percent
-          ? Number(customerPick.stock_pick.expected_return_min_percent)
-          : null,
-        expected_return_max_percent: customerPick.stock_pick
-          .expected_return_max_percent
-          ? Number(customerPick.stock_pick.expected_return_max_percent)
-          : null,
-        time_horizon_min_months:
-          customerPick.stock_pick.time_horizon_min_months,
-        time_horizon_max_months:
-          customerPick.stock_pick.time_horizon_max_months,
-        sector: customerPick.stock_pick.sector,
-        analyst_name: customerPick.stock_pick.analyst_name,
-        admin_notes: customerPick.stock_pick.admin_notes,
-        created_at: customerPick.stock_pick.created_at,
-      },
-      selected_price: customerPick.selected_price
-        ? Number(customerPick.selected_price)
-        : null,
+      ...this.mapToAdminPickDetail(customerPick),
+      selected_price: this.toNumber(customerPick.selected_price) ?? null,
     };
   }
 
@@ -650,76 +570,73 @@ export class StockPicksService {
     adminUserId: string,
     approveDto: AdminApprovePickDto,
   ): Promise<CustomerStockPickResponseDto> {
-    return await this.dataSource.transaction(
-      async (transactionalEntityManager) => {
-        const customerPickRepo =
-          transactionalEntityManager.getRepository(CustomerStockPick);
+    return this.dataSource.transaction(async (manager) => {
+      const customerPickRepo = manager.getRepository(CustomerStockPick);
 
-        const customerPick = await customerPickRepo.findOne({
-          where: { id: customerPickId },
-          relations: ['customer', 'stock_pick'],
-        });
+      const customerPick = await customerPickRepo.findOne({
+        where: { id: customerPickId },
+        relations: ['customer', 'stock_pick'],
+      });
 
-        if (!customerPick) {
-          throw new NotFoundException('Customer pick not found');
-        }
+      if (!customerPick) {
+        throw new NotFoundException('Customer pick not found');
+      }
 
-        if (customerPick.status !== CustomerPickStatus.PAYMENT_SUBMITTED) {
-          throw new BadRequestException(
-            'Customer pick can only be approved after payment submission',
-          );
-        }
+      if (customerPick.status !== CustomerPickStatus.PAYMENT_SUBMITTED) {
+        throw new BadRequestException(
+          'Customer pick can only be approved after payment submission',
+        );
+      }
 
-        const newStatus =
-          approveDto.approve !== false
-            ? CustomerPickStatus.APPROVED
-            : CustomerPickStatus.REJECTED;
+      const newStatus =
+        approveDto.approve !== false
+          ? CustomerPickStatus.APPROVED
+          : CustomerPickStatus.REJECTED;
 
-        // Update the customer pick
-        await customerPickRepo.update(customerPickId, {
-          status: newStatus,
-          admin_response: approveDto.admin_response,
-          approved_by_admin_id: adminUserId,
-          approved_at: new Date(),
-        });
+      await customerPickRepo.update(customerPickId, {
+        status: newStatus,
+        admin_response: approveDto.admin_response,
+        approved_by_admin_id: adminUserId,
+        approved_at: new Date(),
+      });
 
-        const updatedPick = await customerPickRepo.findOne({
-          where: { id: customerPickId },
-          relations: ['customer', 'stock_pick'],
-        });
+      const updatedPick = await customerPickRepo.findOne({
+        where: { id: customerPickId },
+        relations: ['customer', 'stock_pick'],
+      });
 
-        // Send email notifications
-        if (newStatus === CustomerPickStatus.APPROVED) {
-          await this.sendStockPickEmail(updatedPick!);
-        } else if (newStatus === CustomerPickStatus.REJECTED) {
-          await this.sendRejectionEmail(updatedPick!);
-        }
+      // Send email notification (non-blocking)
+      this.sendStatusEmail(updatedPick!, newStatus).catch((err) =>
+        console.error('Failed to send email:', err),
+      );
 
-        return this.mapToCustomerPickResponseDto(updatedPick!);
-      },
-    );
+      return this.mapToCustomerPickResponseDto(updatedPick!);
+    });
   }
 
-  private async sendStockPickEmail(
+  // ============== Email Methods ==============
+
+  private async sendStatusEmail(
     customerPick: CustomerStockPick,
+    status: CustomerPickStatus,
   ): Promise<void> {
-    try {
+    const customerName = this.getCustomerFullName(customerPick.customer);
+    const stockPick = customerPick.stock_pick;
+
+    if (status === CustomerPickStatus.APPROVED) {
       const emailHtml = `
         <h2>Your Stock Pick Has Been Approved!</h2>
-        <p>Dear ${customerPick.customer.first_name} ${customerPick.customer.last_name},</p>
+        <p>Dear ${customerName},</p>
         <p>Great news! Your stock pick has been approved by our team.</p>
-        
         <div style="background: #f5f5f5; padding: 15px; margin: 20px 0; border-radius: 5px;">
           <h3>Stock Details:</h3>
-          <p><strong>Symbol:</strong> ${customerPick.stock_pick.stock_symbol}</p>
-          <p><strong>Description:</strong> ${customerPick.stock_pick.description}</p>
-          ${customerPick.stock_pick.sale_price ? `<p><strong>Sale Price:</strong> $${customerPick.stock_pick.sale_price}</p>` : ''}
-          ${customerPick.stock_pick.target_price ? `<p><strong>Target Price:</strong> $${customerPick.stock_pick.target_price}</p>` : ''}
-          ${customerPick.stock_pick.current_price ? `<p><strong>Current Price:</strong> $${customerPick.stock_pick.current_price}</p>` : ''}
+          <p><strong>Symbol:</strong> ${stockPick.stock_symbol}</p>
+          <p><strong>Description:</strong> ${stockPick.description}</p>
+          ${stockPick.sale_price ? `<p><strong>Sale Price:</strong> $${stockPick.sale_price}</p>` : ''}
+          ${stockPick.target_price ? `<p><strong>Target Price:</strong> $${stockPick.target_price}</p>` : ''}
+          ${stockPick.current_price ? `<p><strong>Current Price:</strong> $${stockPick.current_price}</p>` : ''}
         </div>
-        
         <p><strong>Admin Message:</strong><br>${customerPick.admin_response || 'No additional message.'}</p>
-        
         <p>Happy investing!<br>Your Trading Team</p>
       `;
 
@@ -727,28 +644,12 @@ export class StockPicksService {
         to: customerPick.customer.email,
         subject: 'Your Stock Pick Has Been Approved',
         html: emailHtml,
-        text: `Your stock pick ${customerPick.stock_pick.stock_symbol} has been approved. ${customerPick.admin_response || ''}`,
+        text: `Your stock pick ${stockPick.stock_symbol} has been approved. ${customerPick.admin_response || ''}`,
       });
-
-      // Update email sent timestamp
-      // await this.customerPickRepo.update(customerPick.id, {
-      //   status: CustomerPickStatus.EMAIL_SENT,
-      //   email_sent_at: new Date(),
-      // });
-    } catch (error) {
-      console.error('Failed to send stock pick email:', error);
-      // Don't throw error to avoid transaction rollback
-      // Email failure should not prevent approval
-    }
-  }
-
-  private async sendRejectionEmail(
-    customerPick: CustomerStockPick,
-  ): Promise<void> {
-    try {
+    } else if (status === CustomerPickStatus.REJECTED) {
       const emailHtml = `
         <h2>Your Stock Pick Submission Was Not Approved</h2>
-        <p>Dear ${customerPick.customer.first_name} ${customerPick.customer.last_name},</p>
+        <p>Dear ${customerName},</p>
         <p>We reviewed your stock pick submission and it was <strong>rejected</strong>.</p>
         <div style="background:#f8d7da;padding:15px;border-radius:5px;color:#842029;margin:20px 0;">
           <p style="margin:0;"><strong>Reason:</strong><br>${customerPick.admin_response || 'No reason provided.'}</p>
@@ -763,12 +664,11 @@ export class StockPicksService {
         html: emailHtml,
         text: `Your stock pick submission was rejected. Reason: ${customerPick.admin_response || 'No reason provided.'}`,
       });
-    } catch (error) {
-      console.error('Failed to send rejection email:', error);
     }
   }
 
-  // Helper mapping methods
+  // ============== Mapping Methods ==============
+
   private mapToResponseDto(stockPick: StockPick): StockPickResponseDto {
     return {
       id: stockPick.id,
@@ -832,114 +732,47 @@ export class StockPicksService {
       expires_at: stockPick.expires_at ?? undefined,
       created_at: stockPick.created_at,
       is_selected: isSelected,
-      // Note: stock_symbol is intentionally excluded
     };
   }
 
-  // Card mapping for "my-selections"
-  private mapToCustomerMySelectionItem(customerPick: CustomerStockPick) {
-    const toNum = (v: unknown): number | undefined => {
-      if (v === null || v === undefined) return undefined;
-      const n = typeof v === 'number' ? v : Number(v);
-      return Number.isFinite(n) ? n : undefined;
-    };
-    // Use snapshot selected_price if available, else fall back to target_price
+  private mapToCustomerMySelectionItem(
+    customerPick: CustomerStockPick,
+  ): CustomerMySelectionItemDto {
+    const sp = customerPick.stock_pick;
     const targetPrice =
-      toNum(customerPick.selected_price) ??
-      toNum(customerPick.stock_pick?.target_price);
-    const currentPrice = toNum(customerPick.stock_pick?.current_price);
-    let changePercent: number | undefined = undefined;
-    if (
-      targetPrice !== undefined &&
-      targetPrice !== null &&
-      targetPrice > 0 &&
-      currentPrice !== undefined &&
-      currentPrice !== null
-    ) {
+      this.toNumber(customerPick.selected_price) ??
+      this.toNumber(sp?.target_price);
+    const currentPrice = this.toNumber(sp?.current_price);
+
+    let changePercent: number | undefined;
+    if (targetPrice && targetPrice > 0 && currentPrice !== undefined) {
       changePercent = ((currentPrice - targetPrice) / targetPrice) * 100;
     }
-    const isPositive =
-      changePercent === undefined ? undefined : changePercent >= 0;
-
-    const formatMoney = (val?: number) =>
-      typeof val === 'number' && Number.isFinite(val)
-        ? `$${val.toFixed(2)}`
-        : undefined;
-    const formatChange = (val?: number) =>
-      typeof val === 'number'
-        ? `${val >= 0 ? '+' : ''}${val.toFixed(1)}%`
-        : undefined;
-    const toTitleCaseRec = (rec?: string | null) => {
-      if (!rec) return undefined;
-      switch (rec) {
-        case 'buy':
-          return 'Buy';
-        case 'hold':
-          return 'Hold';
-        case 'strong_buy':
-          return 'Strong Buy';
-        case 'sell':
-          return 'Sell';
-        default:
-          return undefined;
-      }
-    };
-    const formatDate = (d?: Date | null) => {
-      if (!d) return undefined;
-      try {
-        return new Date(d).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        });
-      } catch {
-        return undefined;
-      }
-    };
 
     return {
       id: customerPick.id,
       date:
-        formatDate(customerPick.approved_at ?? customerPick.selected_at) ?? '',
+        this.formatDate(customerPick.approved_at ?? customerPick.selected_at) ??
+        '',
       stock:
         customerPick.status === CustomerPickStatus.APPROVED
-          ? customerPick.stock_pick?.stock_symbol
+          ? sp?.stock_symbol
           : undefined,
-      company:
-        customerPick.stock_pick?.company ||
-        customerPick.stock_pick?.stock_symbol ||
-        'N/A',
-      buyPrice: formatMoney(targetPrice),
-      currentPrice: formatMoney(currentPrice),
-      change: formatChange(changePercent),
-      isPositive: isPositive,
-      // Current customer pick status label
-      status:
-        customerPick.status === CustomerPickStatus.PAYMENT_SUBMITTED
-          ? 'Payment Submitted'
-          : customerPick.status === CustomerPickStatus.APPROVED
-            ? 'Approved'
-            : customerPick.status === CustomerPickStatus.REJECTED
-              ? 'Rejected'
-              : customerPick.status === CustomerPickStatus.EMAIL_SENT
-                ? 'Email Sent'
-                : 'Selected',
-      recommendation:
-        toTitleCaseRec(customerPick.stock_pick?.recommendation ?? undefined) ||
-        'N/A',
-      risk_level: customerPick.stock_pick?.risk_level
-        ? customerPick.stock_pick.risk_level
-            .split('_')
-            .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-            .join(' ')
-        : 'N/A',
+      company: sp?.company || sp?.stock_symbol || 'N/A',
+      buyPrice: this.formatMoney(targetPrice),
+      currentPrice: this.formatMoney(currentPrice),
+      change: this.formatPercent(changePercent),
+      isPositive: changePercent !== undefined ? changePercent >= 0 : undefined,
+      status: STATUS_LABELS[customerPick.status] || 'Selected',
+      recommendation: RECOMMENDATION_MAP[sp?.recommendation ?? ''] || 'N/A',
+      risk_level: sp?.risk_level ? this.toTitleCase(sp.risk_level) : 'N/A',
     };
   }
 
   private mapToCustomerPickResponseDto(
     customerPick: CustomerStockPick,
   ): CustomerStockPickResponseDto {
-    const baseResponse = {
+    const baseResponse: CustomerStockPickResponseDto = {
       id: customerPick.id,
       customer_id: customerPick.customer_id,
       stock_pick_id: customerPick.stock_pick_id,
@@ -958,7 +791,7 @@ export class StockPicksService {
       updated_at: customerPick.updated_at,
     };
 
-    // Only include stock symbol when the pick is approved
+    // Include stock symbol only when approved
     if (
       customerPick.status === CustomerPickStatus.APPROVED &&
       customerPick.stock_pick
@@ -972,9 +805,53 @@ export class StockPicksService {
     return baseResponse;
   }
 
-  // Summary stats for the dashboard cards in the screenshot
+  private mapStockPickDetail(sp: StockPick) {
+    return {
+      id: sp.id,
+      stock_symbol: sp.stock_symbol,
+      company: sp.company,
+      description: sp.description,
+      service_type: sp.service_type,
+      current_price: this.toNumber(sp.current_price) ?? null,
+      target_price: this.toNumber(sp.target_price) ?? null,
+      sale_price: this.toNumber(sp.sale_price) ?? 0,
+      status: sp.status,
+      availability: sp.availability,
+      risk_level: sp.risk_level,
+      recommendation: sp.recommendation,
+      expected_return_min_percent:
+        this.toNumber(sp.expected_return_min_percent) ?? null,
+      expected_return_max_percent:
+        this.toNumber(sp.expected_return_max_percent) ?? null,
+      time_horizon_min_months: sp.time_horizon_min_months,
+      time_horizon_max_months: sp.time_horizon_max_months,
+      sector: sp.sector,
+      analyst_name: sp.analyst_name,
+      admin_notes: sp.admin_notes,
+      created_at: sp.created_at,
+    };
+  }
+
+  private mapToAdminPickDetail(pick: CustomerStockPick) {
+    const baseDto = this.mapToCustomerPickResponseDto(pick);
+    return {
+      ...baseDto,
+      customer_email: pick.customer.email,
+      customer_name: this.getCustomerFullName(pick.customer),
+      stock_symbol: pick.stock_pick.stock_symbol,
+      customer: {
+        id: pick.customer.id,
+        first_name: pick.customer.first_name,
+        last_name: pick.customer.last_name,
+        email: pick.customer.email,
+      },
+      stock_pick: this.mapStockPickDetail(pick.stock_pick),
+    };
+  }
+
+  // ============== Stats Methods ==============
+
   async getCustomerSummaryStats(customerId: string) {
-    // Consider only approved picks for performance/returns computation
     const picks = await this.customerPickRepo.find({
       where: { customer_id: customerId, status: CustomerPickStatus.APPROVED },
       relations: ['stock_pick'],
@@ -984,32 +861,25 @@ export class StockPicksService {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const toNum = (v: unknown): number | undefined => {
-      if (v === null || v === undefined) return undefined;
-      const n = typeof v === 'number' ? v : Number(v);
-      return Number.isFinite(n) ? n : undefined;
-    };
-
     const totalApproved = picks.length;
     const thisMonthNew = picks.filter(
       (p) => p.approved_at && p.approved_at >= startOfMonth,
     ).length;
 
-    // For win rate, count as win if current > selected_price
-    // Only consider picks with both prices present
     let wins = 0;
     let considered = 0;
     let totalCurrent = 0;
     let totalInvested = 0;
 
     for (const p of picks) {
-      // Use selected_price snapshot as baseline. If missing (legacy), fall back to target_price.
       const baseline =
-        toNum(p.selected_price) ?? toNum(p.stock_pick?.target_price);
-      const current = toNum(p.stock_pick?.current_price);
+        this.toNumber(p.selected_price) ??
+        this.toNumber(p.stock_pick?.target_price);
+      const current = this.toNumber(p.stock_pick?.current_price);
+
       if (baseline !== undefined && current !== undefined && baseline > 0) {
-        considered += 1;
-        if (current > baseline) wins += 1;
+        considered++;
+        if (current > baseline) wins++;
         totalCurrent += current;
         totalInvested += baseline;
       }
