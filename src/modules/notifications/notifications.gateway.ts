@@ -76,6 +76,9 @@ export class NotificationsGateway
   /**
    * Subscribe client to notifications
    * Clients must send their userId and type (admin/customer) to subscribe
+   *
+   * For admins: joins both 'admin' room (for legacy/broadcast) AND their individual userId room
+   * This allows per-user notification preferences to work correctly.
    */
   @SubscribeMessage('subscribe')
   async handleSubscribe(
@@ -94,17 +97,27 @@ export class NotificationsGateway
     // Store client mapping
     this.connectedClients.set(client.id, userId);
 
-    // Join appropriate room
-    const room = type === 'admin' ? 'admin' : userId;
-    await client.join(room);
-
-    this.logger.log(
-      `✅ Client ${client.id} subscribed as ${type} to room: ${room}`,
-    );
+    // For admins: join both 'admin' room (legacy) and individual userId room
+    // This allows receiving notifications based on individual preferences
+    if (type === 'admin') {
+      await client.join('admin');
+      await client.join(userId);
+      this.logger.log(
+        `✅ Client ${client.id} subscribed as admin to rooms: admin, ${userId}`,
+      );
+    } else {
+      // Customers only join their userId room
+      await client.join(userId);
+      this.logger.log(
+        `✅ Client ${client.id} subscribed as customer to room: ${userId}`,
+      );
+    }
 
     // Send existing notifications to the client
+    // For admins with individual preferences, fetch by their userId
+    const recipientId = type === 'admin' ? userId : userId;
     const notifications =
-      await this.notificationsService.getNotificationsByRecipient(room);
+      await this.notificationsService.getNotificationsByRecipient(recipientId);
 
     this.logger.log(
       `📦 Sending ${notifications.length} existing notifications to client ${client.id}`,
@@ -114,7 +127,7 @@ export class NotificationsGateway
 
     const response = {
       success: true,
-      message: `Subscribed to ${type} notifications in room: ${room}`,
+      message: `Subscribed to ${type} notifications`,
     };
 
     // Also emit as a separate event for frontend logging

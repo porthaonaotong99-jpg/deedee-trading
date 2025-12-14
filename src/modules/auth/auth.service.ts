@@ -2,6 +2,7 @@ import {
   Injectable,
   UnauthorizedException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -51,8 +52,22 @@ import { CustomerServiceType } from '../customers/entities/customer-service.enti
 import { parseDeviceContext } from '../../common/utils/device.util';
 import { lookupGeoLocation } from '../../common/utils/geoip.util';
 
+// 2FA Rate limiting - prevent brute force attacks
+interface TwoFactorAttempt {
+  attempts: number;
+  lastAttempt: number;
+  lockedUntil?: number;
+}
+
+const MAX_2FA_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes lockout
+const ATTEMPT_WINDOW_MS = 5 * 60 * 1000; // 5 minute window for counting attempts
+
 @Injectable()
 export class AuthService {
+  // In-memory store for 2FA rate limiting (use Redis in production for scaling)
+  private twoFactorAttempts: Map<string, TwoFactorAttempt> = new Map();
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -65,7 +80,64 @@ export class AuthService {
     private readonly customersService: CustomersService,
   ) {}
 
-  async loginUser(loginDto: LoginDto): Promise<LoginResponseDto> {
+  /**
+   * Check and update 2FA rate limiting for a user
+   */
+  private check2FAAttemptLimit(userId: string): void {
+    const now = Date.now();
+    const attempt = this.twoFactorAttempts.get(userId);
+
+    if (attempt) {
+      // Check if currently locked out
+      if (attempt.lockedUntil && now < attempt.lockedUntil) {
+        const remainingMinutes = Math.ceil((attempt.lockedUntil - now) / 60000);
+        throw new BadRequestException(
+          `Too many failed 2FA attempts. Please try again in ${remainingMinutes} minute(s).`,
+        );
+      }
+
+      // Reset if outside the attempt window
+      if (now - attempt.lastAttempt > ATTEMPT_WINDOW_MS) {
+        this.twoFactorAttempts.delete(userId);
+      }
+    }
+  }
+
+  /**
+   * Record a failed 2FA attempt
+   */
+  private record2FAFailedAttempt(userId: string): void {
+    const now = Date.now();
+    const attempt = this.twoFactorAttempts.get(userId);
+
+    if (attempt) {
+      attempt.attempts += 1;
+      attempt.lastAttempt = now;
+
+      if (attempt.attempts >= MAX_2FA_ATTEMPTS) {
+        attempt.lockedUntil = now + LOCKOUT_DURATION_MS;
+      }
+    } else {
+      this.twoFactorAttempts.set(userId, {
+        attempts: 1,
+        lastAttempt: now,
+      });
+    }
+  }
+
+  /**
+   * Clear 2FA attempts on successful verification
+   */
+  private clear2FAAttempts(userId: string): void {
+    this.twoFactorAttempts.delete(userId);
+  }
+
+  async loginUser(
+    loginDto: LoginDto,
+  ): Promise<
+    | LoginResponseDto
+    | { requires_2fa: boolean; temp_token: string; message: string }
+  > {
     const user = await this.userRepository.findOne({
       where: { username: loginDto.username },
       relations: ['role'],
@@ -84,6 +156,25 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // Check if 2FA is enabled
+    if (user.two_factor_enabled) {
+      // Create a temporary token for 2FA verification
+      const secret =
+        this.configService.get<string>('JWT_ADMIN_SECRET') ||
+        this.configService.get<string>('JWT_SECRET', 'your-secret-key');
+
+      const tempToken = this.jwtService.sign(
+        { sub: user.id, type: '2fa_pending' },
+        { secret, expiresIn: '5m' }, // 5 minutes to complete 2FA
+      );
+
+      return {
+        requires_2fa: true,
+        temp_token: tempToken,
+        message: 'Two-factor authentication required',
+      };
+    }
+
     const payload: JwtPayload = {
       sub: user.id,
       username: user.username,
@@ -95,6 +186,108 @@ export class AuthService {
       this.configService.get<string>('JWT_ADMIN_SECRET') ||
       this.configService.get<string>('JWT_SECRET', 'your-secret-key');
     const access_token = this.jwtService.sign(payload, { secret });
+
+    return {
+      access_token,
+      token_type: 'Bearer',
+      expires_in: 86400, // 24 hours
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role?.name || undefined,
+      },
+    };
+  }
+
+  /**
+   * Verify 2FA code and complete login
+   */
+  async verifyTwoFactorLogin(
+    tempToken: string,
+    code?: string,
+    backupCode?: string,
+  ): Promise<LoginResponseDto> {
+    const { authenticator } = await import('otplib');
+
+    // Verify the temp token
+    const secret =
+      this.configService.get<string>('JWT_ADMIN_SECRET') ||
+      this.configService.get<string>('JWT_SECRET', 'your-secret-key');
+
+    let payload: { sub: string; type: string };
+    try {
+      payload = this.jwtService.verify(tempToken, { secret });
+    } catch {
+      throw new UnauthorizedException('Invalid or expired verification token');
+    }
+
+    if (payload.type !== '2fa_pending') {
+      throw new UnauthorizedException('Invalid token type');
+    }
+
+    const userId = payload.sub;
+
+    // Check rate limiting BEFORE verifying code
+    this.check2FAAttemptLimit(userId);
+
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+      relations: ['role'],
+    });
+
+    if (!user || !user.two_factor_enabled || !user.two_factor_secret) {
+      throw new UnauthorizedException('2FA not properly configured');
+    }
+
+    // At this point, two_factor_secret is guaranteed to be non-null
+    const twoFactorSecret = user.two_factor_secret;
+
+    // Verify either TOTP code or backup code
+    let verified = false;
+
+    if (code) {
+      verified = authenticator.verify({
+        token: code,
+        secret: twoFactorSecret,
+      });
+    } else if (backupCode) {
+      // Hash the backup code and check against stored codes
+      const crypto = await import('crypto');
+      const hashedCode = crypto
+        .createHash('sha256')
+        .update(backupCode.toUpperCase().replace(/\s/g, ''))
+        .digest('hex');
+
+      const backupCodes: string[] = user.two_factor_backup_codes || [];
+      const codeIndex = backupCodes.findIndex((c: string) => c === hashedCode);
+
+      if (codeIndex !== -1) {
+        verified = true;
+        // Remove the used backup code
+        backupCodes.splice(codeIndex, 1);
+        user.two_factor_backup_codes = backupCodes;
+        await this.userRepository.save(user);
+      }
+    }
+
+    if (!verified) {
+      // Record failed attempt for rate limiting
+      this.record2FAFailedAttempt(userId);
+      throw new UnauthorizedException('Invalid verification code');
+    }
+
+    // Clear rate limiting on successful verification
+    this.clear2FAAttempts(userId);
+
+    // Generate full access token
+    const jwtPayload: JwtPayload = {
+      sub: user.id,
+      username: user.username,
+      type: 'user',
+      roleId: user.role_id,
+    };
+
+    const access_token = this.jwtService.sign(jwtPayload, { secret });
 
     return {
       access_token,

@@ -28,6 +28,7 @@ import { DistrictModule } from './modules/district/district.module';
 import { InvestmentInfoModule } from './modules/investment-info/investment-info.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { SettingsModule } from './modules/settings/settings.module';
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     DistrictModule,
     InvestmentInfoModule,
     DashboardModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

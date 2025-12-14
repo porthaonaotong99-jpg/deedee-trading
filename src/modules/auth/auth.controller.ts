@@ -26,6 +26,7 @@ import {
   AuthLoginCustomerResponseExample,
 } from '../../docs/swagger';
 import { AuthService } from './auth.service';
+import { TwoFactorService } from './two-factor.service';
 import {
   LoginDto,
   CustomerLoginDto,
@@ -43,11 +44,20 @@ import {
 } from '../../common/utils/response.util';
 import { RefreshTokenDto } from './dto/session.dto';
 import { JwtUserAuthGuard } from './guards/jwt-user.guard';
+import {
+  Verify2FADto,
+  Disable2FADto,
+  Regenerate2FADto,
+  LoginWith2FADto,
+} from './dto/two-factor.dto';
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly twoFactorService: TwoFactorService,
+  ) {}
 
   @Post('customer/register')
   @ApiOperation({ summary: 'Register new customer account' })
@@ -103,14 +113,29 @@ export class AuthController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Login successful',
+    description: 'Login successful or 2FA required',
     schema: { example: AuthLoginUserResponseExample },
   })
   @ApiResponse({ status: 400, description: 'Validation error' })
   async loginUser(
     @Body(ValidationPipe) loginDto: LoginDto,
-  ): Promise<IOneResponse<LoginResponseDto>> {
+  ): Promise<
+    IOneResponse<
+      | LoginResponseDto
+      | { requires_2fa: boolean; temp_token: string; message: string }
+    >
+  > {
     const data = await this.authService.loginUser(loginDto);
+
+    // Check if 2FA is required
+    if ('requires_2fa' in data && data.requires_2fa) {
+      return handleSuccessOne({
+        data,
+        message: data.message,
+        statusCode: 200,
+      });
+    }
+
     return handleSuccessOne({
       data,
       message: 'Login successful',
@@ -429,6 +454,286 @@ export class AuthController {
     return handleSuccessOne({
       data,
       message: 'Password changed successfully',
+      statusCode: 200,
+    });
+  }
+
+  // ============ Two-Factor Authentication ============
+
+  @Post('2fa/setup')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Set up 2FA for current admin/user' })
+  @ApiResponse({
+    status: 200,
+    description: '2FA setup initiated, returns QR code and secret',
+    schema: {
+      example: {
+        is_error: false,
+        code: 'SUCCESS',
+        message: '2FA setup initiated',
+        data: {
+          secret: 'ABCD1234EFGH5678',
+          qrCode: 'data:image/png;base64,...',
+          manualEntryKey: 'ABCD 1234 EFGH 5678',
+        },
+        status_code: 200,
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: '2FA is already enabled' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async setup2FA(
+    @Req()
+    req: {
+      user?: { sub: string; username: string; roleId: string; type: string };
+    },
+  ) {
+    const userId = req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    const data = await this.twoFactorService.generateSecret(userId);
+    return handleSuccessOne({
+      data,
+      message:
+        '2FA setup initiated. Scan the QR code with your authenticator app.',
+      statusCode: 200,
+    });
+  }
+
+  @Post('2fa/enable')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Verify and enable 2FA' })
+  @ApiBody({
+    description: 'TOTP code from authenticator app',
+    schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', example: '123456' },
+      },
+      required: ['code'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: '2FA enabled successfully',
+    schema: {
+      example: {
+        is_error: false,
+        code: 'SUCCESS',
+        message: '2FA has been enabled successfully',
+        data: {
+          enabled: true,
+          backup_codes: ['ABCD1234', 'EFGH5678', '...'],
+        },
+        status_code: 200,
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid verification code' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async enable2FA(
+    @Req()
+    req: {
+      user?: { sub: string; username: string; roleId: string; type: string };
+    },
+    @Body(ValidationPipe) dto: Verify2FADto,
+  ) {
+    const userId = req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    const data = await this.twoFactorService.enableTwoFactor(userId, dto.code);
+    return handleSuccessOne({
+      data,
+      message: data.message,
+      statusCode: 200,
+    });
+  }
+
+  @Post('2fa/disable')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Disable 2FA' })
+  @ApiBody({
+    description: 'Password and TOTP code or backup code to disable 2FA',
+    schema: {
+      type: 'object',
+      properties: {
+        password: { type: 'string' },
+        code: { type: 'string', description: 'TOTP code from authenticator' },
+        backup_code: { type: 'string', description: 'Or use a backup code' },
+      },
+      required: ['password'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: '2FA disabled successfully',
+  })
+  @ApiResponse({ status: 400, description: 'Invalid code or 2FA not enabled' })
+  @ApiResponse({ status: 401, description: 'Invalid password or unauthorized' })
+  async disable2FA(
+    @Req()
+    req: {
+      user?: { sub: string; username: string; roleId: string; type: string };
+    },
+    @Body(ValidationPipe) dto: Disable2FADto,
+  ) {
+    const userId = req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    const data = await this.twoFactorService.disableTwoFactor(
+      userId,
+      dto.password,
+      dto.code,
+      dto.backup_code,
+    );
+    return handleSuccessOne({
+      data,
+      message: data.message,
+      statusCode: 200,
+    });
+  }
+
+  @Get('2fa/status')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get 2FA status for current user' })
+  @ApiResponse({
+    status: 200,
+    description: '2FA status',
+    schema: {
+      example: {
+        is_error: false,
+        code: 'SUCCESS',
+        message: '2FA status retrieved',
+        data: {
+          enabled: true,
+          backup_codes_remaining: 8,
+        },
+        status_code: 200,
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async get2FAStatus(
+    @Req()
+    req: {
+      user?: { sub: string; username: string; roleId: string; type: string };
+    },
+  ) {
+    const userId = req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    const data = await this.twoFactorService.getStatus(userId);
+    return handleSuccessOne({
+      data,
+      message: '2FA status retrieved',
+      statusCode: 200,
+    });
+  }
+
+  @Post('2fa/regenerate-backup-codes')
+  @UseGuards(JwtUserAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Regenerate backup codes (requires TOTP verification)',
+  })
+  @ApiBody({
+    description: 'Current TOTP code to verify before regenerating',
+    schema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', example: '123456' },
+      },
+      required: ['code'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Backup codes regenerated',
+    schema: {
+      example: {
+        is_error: false,
+        code: 'SUCCESS',
+        message: 'Backup codes regenerated',
+        data: {
+          backup_codes: ['ABCD1234', 'EFGH5678', '...'],
+        },
+        status_code: 200,
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid code or 2FA not enabled' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async regenerateBackupCodes(
+    @Req()
+    req: {
+      user?: { sub: string; username: string; roleId: string; type: string };
+    },
+    @Body(ValidationPipe) dto: Regenerate2FADto,
+  ) {
+    const userId = req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+    const data = await this.twoFactorService.regenerateBackupCodes(
+      userId,
+      dto.code,
+    );
+    return handleSuccessOne({
+      data,
+      message: data.message,
+      statusCode: 200,
+    });
+  }
+
+  @Post('2fa/verify')
+  @ApiOperation({ summary: 'Complete login with 2FA code' })
+  @ApiBody({
+    description: 'Temp token and 2FA code to complete login',
+    schema: {
+      type: 'object',
+      properties: {
+        temp_token: { type: 'string' },
+        code: { type: 'string', description: 'TOTP code from authenticator' },
+        backup_code: { type: 'string', description: 'Or use a backup code' },
+      },
+      required: ['temp_token'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Login completed with 2FA',
+    schema: {
+      example: {
+        is_error: false,
+        code: 'SUCCESS',
+        message: 'Login successful',
+        data: {
+          access_token: 'jwt-token',
+          user: { id: 'user-id', username: 'admin' },
+        },
+        status_code: 200,
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Invalid code' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired temp token' })
+  async verify2FALogin(@Body(ValidationPipe) dto: LoginWith2FADto) {
+    const data = await this.authService.verifyTwoFactorLogin(
+      dto.temp_token,
+      dto.code,
+      dto.backup_code,
+    );
+    return handleSuccessOne({
+      data,
+      message: 'Login successful',
       statusCode: 200,
     });
   }

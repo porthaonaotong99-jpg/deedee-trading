@@ -10,6 +10,8 @@ import { CustomerService } from '../customers/entities/customer-service.entity';
 import { CustomerStockPick } from '../stock-picks/entities/customer-stock-pick.entity';
 import { TransferHistory } from '../transfer-history/entities/transfer-history.entity';
 import { InvestmentRequest } from '../investment-info/entities/investment-request.entity';
+import { User } from '../users/entities/user.entity';
+import { UserSettings } from '../settings/entities/user-settings.entity';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { InvestmentRequest } from '../investment-info/entities/investment-reques
       CustomerStockPick,
       TransferHistory,
       InvestmentRequest,
+      User,
+      UserSettings,
     ]),
   ],
   providers: [NotificationsService, NotificationsGateway],

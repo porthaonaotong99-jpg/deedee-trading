@@ -56,6 +56,16 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   profile: string;
 
+  // Two-Factor Authentication
+  @Column({ type: 'boolean', default: false })
+  two_factor_enabled: boolean;
+
+  @Column({ type: 'varchar', nullable: true })
+  two_factor_secret: string | null;
+
+  @Column({ type: 'simple-array', nullable: true })
+  two_factor_backup_codes: string[] | null;
+
   @Column({ type: 'uuid', nullable: true })
   role_id: string;
 

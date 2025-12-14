@@ -4,8 +4,15 @@ import { Repository } from 'typeorm';
 import {
   NotificationPayload,
   NotificationResponse,
+  NotificationRecipientType,
 } from './interfaces/notification.interface';
 import { Notification } from './entities/notification.entity';
+import { User } from '../users/entities/user.entity';
+import { UserSettings } from '../settings/entities/user-settings.entity';
+import {
+  shouldSendNotification,
+  getSettingKeyForCategory,
+} from './utils/notification-settings-mapper';
 
 /**
  * Interface for the gateway to avoid circular dependency
@@ -29,6 +36,10 @@ export class NotificationsService {
   constructor(
     @InjectRepository(Notification)
     private readonly notificationRepository: Repository<Notification>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(UserSettings)
+    private readonly userSettingsRepository: Repository<UserSettings>,
   ) {}
 
   /**
@@ -45,9 +56,10 @@ export class NotificationsService {
    *
    * This is the central function that all routes will call to create notifications.
    * It automatically handles:
-   * 1. Database persistence
-   * 2. Real-time Socket.IO emission
-   * 3. Error handling (wrapped in try-catch)
+   * 1. Admin notification preference filtering
+   * 2. Database persistence (for each admin who has the setting enabled)
+   * 3. Real-time Socket.IO emission
+   * 4. Error handling (wrapped in try-catch)
    *
    * @param payload - The notification payload
    * @returns The created notification or null if failed
@@ -56,50 +68,16 @@ export class NotificationsService {
     payload: NotificationPayload,
   ): Promise<NotificationResponse | null> {
     try {
-      const notification = this.notificationRepository.create({
-        category: payload.category,
-        action: payload.action,
-        recipientType: payload.recipientType,
-        recipientId: payload.recipientId,
-        title: payload.title,
-        message: payload.message,
-        metadata: payload.metadata as unknown as Record<string, unknown>,
-        isRead: false,
-        createdBy: payload.createdBy,
-      });
-
-      const savedNotification =
-        await this.notificationRepository.save(notification);
-
-      const response = this.mapToResponse(savedNotification);
-
-      this.logger.log(
-        `✅ Notification created: ${savedNotification.category}:${savedNotification.action} for ${savedNotification.recipientType}:${savedNotification.recipientId}`,
-      );
-
-      // Emit real-time notification via Socket.IO (if gateway is available)
-      if (this.gateway) {
-        this.logger.log(
-          `📡 Attempting to emit notification via Socket.IO to room: ${response.recipientId}`,
-        );
-        try {
-          this.gateway.emitNotification(response);
-          this.logger.log('✅ Socket.IO emission completed');
-        } catch (emitError) {
-          // Don't fail the entire operation if Socket.IO emission fails
-          const errorMessage =
-            emitError instanceof Error ? emitError.message : 'Unknown error';
-          this.logger.error(
-            `❌ Failed to emit notification via Socket.IO: ${errorMessage}`,
-          );
-        }
-      } else {
-        this.logger.warn(
-          '⚠️  Gateway not available, notification not emitted via Socket.IO',
-        );
+      // Check if this is an admin notification that needs preference filtering
+      if (
+        payload.recipientType === NotificationRecipientType.ADMIN &&
+        payload.recipientId === 'admin'
+      ) {
+        return this.createAdminNotificationWithPreferences(payload);
       }
 
-      return response;
+      // For customer notifications, proceed as normal (single recipient)
+      return this.createSingleNotification(payload);
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown error';
@@ -110,6 +88,131 @@ export class NotificationsService {
       );
       return null;
     }
+  }
+
+  /**
+   * Creates notifications for all admin users based on their individual preferences
+   */
+  private async createAdminNotificationWithPreferences(
+    payload: NotificationPayload,
+  ): Promise<NotificationResponse | null> {
+    // Get all admin users
+    const adminUsers = await this.userRepository.find({
+      select: ['id', 'username'],
+    });
+
+    if (adminUsers.length === 0) {
+      this.logger.warn('⚠️  No admin users found to send notification to');
+      return null;
+    }
+
+    const settingKey = getSettingKeyForCategory(payload.category);
+    this.logger.log(
+      `📋 Notification category ${payload.category} maps to setting: ${settingKey}`,
+    );
+
+    let firstResponse: NotificationResponse | null = null;
+    let sentCount = 0;
+
+    // Create notification for each admin who has the setting enabled
+    for (const admin of adminUsers) {
+      // Get admin's notification settings
+      let settings = await this.userSettingsRepository.findOne({
+        where: { user_id: admin.id },
+      });
+
+      // If no settings exist, use defaults (all enabled)
+      if (!settings) {
+        settings = {
+          notify_new_customers: true,
+          notify_payments: true,
+          notify_investments: true,
+          notify_stock_activity: true,
+          notify_system_alerts: true,
+          notify_email: false,
+        } as UserSettings;
+      }
+
+      // Check if this admin wants this type of notification
+      if (!shouldSendNotification(payload.category, settings)) {
+        this.logger.log(
+          `⏭️  Skipping notification for admin ${admin.username} - ${settingKey} is disabled`,
+        );
+        continue;
+      }
+
+      // Create notification for this specific admin
+      const adminPayload: NotificationPayload = {
+        ...payload,
+        recipientId: admin.id, // Use individual admin ID instead of 'admin'
+      };
+
+      const response = await this.createSingleNotification(adminPayload);
+      if (response) {
+        sentCount++;
+        if (!firstResponse) {
+          firstResponse = response;
+        }
+      }
+    }
+
+    this.logger.log(
+      `✅ Admin notification sent to ${sentCount}/${adminUsers.length} admins based on preferences`,
+    );
+
+    return firstResponse;
+  }
+
+  /**
+   * Creates a single notification for a specific recipient
+   */
+  private async createSingleNotification(
+    payload: NotificationPayload,
+  ): Promise<NotificationResponse | null> {
+    const notification = this.notificationRepository.create({
+      category: payload.category,
+      action: payload.action,
+      recipientType: payload.recipientType,
+      recipientId: payload.recipientId,
+      title: payload.title,
+      message: payload.message,
+      metadata: payload.metadata as unknown as Record<string, unknown>,
+      isRead: false,
+      createdBy: payload.createdBy,
+    });
+
+    const savedNotification =
+      await this.notificationRepository.save(notification);
+
+    const response = this.mapToResponse(savedNotification);
+
+    this.logger.log(
+      `✅ Notification created: ${savedNotification.category}:${savedNotification.action} for ${savedNotification.recipientType}:${savedNotification.recipientId}`,
+    );
+
+    // Emit real-time notification via Socket.IO (if gateway is available)
+    if (this.gateway) {
+      this.logger.log(
+        `📡 Attempting to emit notification via Socket.IO to room: ${response.recipientId}`,
+      );
+      try {
+        this.gateway.emitNotification(response);
+        this.logger.log('✅ Socket.IO emission completed');
+      } catch (emitError) {
+        // Don't fail the entire operation if Socket.IO emission fails
+        const errorMessage =
+          emitError instanceof Error ? emitError.message : 'Unknown error';
+        this.logger.error(
+          `❌ Failed to emit notification via Socket.IO: ${errorMessage}`,
+        );
+      }
+    } else {
+      this.logger.warn(
+        '⚠️  Gateway not available, notification not emitted via Socket.IO',
+      );
+    }
+
+    return response;
   }
 
   /**
